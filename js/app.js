@@ -75,6 +75,7 @@ function showStep(viewId, step) {
 
 function go(next) {
     if (busy && !confirm('Stop and discard this job?')) return;
+    if (!busy && lock.words.length && !confirm("Leave without your key? You won't see it again, and the file can't be opened without it.")) return;
     stopJob();
     view = next;
     for (const name of ['home', 'lock', 'open']) $(`view-${name}`).hidden = name !== next;
@@ -119,6 +120,7 @@ function clearKeyDisplay() {
     $('lock-key').replaceChildren();
     $('key-saved').checked = false;
     $('lock-finish').disabled = true;
+    $('key-saved-hint').hidden = false;
 }
 
 function resetLock(alertText = '') {
@@ -493,7 +495,10 @@ function init() {
         const text = `Here is the key for the file I sent you: ${lock.words.join('-')}\nOpen it at ${site}. I sent the file separately.`;
         copyText(text, event.currentTarget, 'Message copied');
     });
-    $('key-saved').addEventListener('change', (event) => { $('lock-finish').disabled = !event.target.checked; });
+    $('key-saved').addEventListener('change', (event) => {
+        $('lock-finish').disabled = !event.target.checked;
+        $('key-saved-hint').hidden = event.target.checked;
+    });
     $('lock-finish').addEventListener('click', () => {
         clearKeyDisplay();
         go('home');
