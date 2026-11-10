@@ -125,6 +125,13 @@ It sends the same headers as `_headers` and turns off caching. It only listens o
 
 ## Tests
 
+The end-to-end test needs Playwright for Python, its Chromium browser, and 7-Zip (`apt install p7zip-full` on Linux, `brew install p7zip` on macOS, or the 7-Zip installer on Windows, with `7z` on your PATH).
+
+```bash
+pip install -r tests/requirements.txt
+python3 -m playwright install chromium
+```
+
 ```bash
 node --test tests/*.test.mjs
 python3 tools/serve.py 8600 &
