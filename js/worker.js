@@ -4,6 +4,7 @@ import {
     HEADER_BYTES, KIND_FILE, KIND_BUNDLE, MAX_BUNDLE_FILES, SealError, parseHeader, cleanName,
 } from './format.js';
 import { createSealer, sealStream, createOpener, openMeta, checkLength, unsealStream, META_CIPHER_BYTES } from './core.js';
+import { HAT_HEAD_BYTES, HAT_V1_MAX, hatKind, prepareHatV2, openHatV1 } from './hatsh.js';
 
 const READ_BYTES = 4 * 1048576;
 const ready = sodiumModule.ready.then(() => sodiumModule);
@@ -163,6 +164,46 @@ async function runOpen() {
     reply({ type: 'done' });
 }
 
+async function prepareHat({ file, password }) {
+    const kind = hatKind(await readAt(file, 0, HAT_HEAD_BYTES));
+    if (kind === 'v2') {
+        const sodium = await ready;
+        const opened = await prepareHatV2(sodium, password, (offset, length) => readAt(file, offset, length), file.size);
+        job = { id: currentId, kind: 'hat', size: opened.plainSize, stream: opened.stream() };
+    } else if (kind === 'v1') {
+        if (file.size > HAT_V1_MAX) throw new SealError('too_large');
+        const data = await openHatV1(crypto.subtle, await readAt(file, 0, file.size), password);
+        job = { id: currentId, kind: 'hat', size: data.length, stream: pieces(data) };
+    } else {
+        throw new SealError(kind === 'v2-keypair' ? 'hat_keypair' : 'not_hat');
+    }
+    reply({ type: 'hat-ready', size: job.size, version: kind });
+}
+
+async function* pieces(data) {
+    if (data.length === 0) yield { data, done: 0, final: true };
+    for (let offset = 0; offset < data.length; offset += READ_BYTES) {
+        const end = Math.min(offset + READ_BYTES, data.length);
+        yield { data: data.subarray(offset, end), done: end, final: end === data.length };
+    }
+}
+
+async function runHat() {
+    const { id, size, stream } = job;
+    let last = 0;
+    for await (const { data, done, final } of stream) {
+        checkCancelled(id);
+        const now = Date.now();
+        if (now - last > 80 || final) {
+            last = now;
+            reply({ type: 'progress', done, total: size });
+        }
+        await send(data, id);
+    }
+    job = null;
+    reply({ type: 'done' });
+}
+
 onmessage = async ({ data: message }) => {
     try {
         if (message.type === 'ack' || message.type === 'cancel') {
@@ -180,9 +221,11 @@ onmessage = async ({ data: message }) => {
             await inspect(message);
         } else if (message.type === 'open-prepare') {
             await prepareOpen(message);
+        } else if (message.type === 'hat-prepare') {
+            await prepareHat(message);
         } else if (message.type === 'start') {
             if (!job) throw new SealError('unknown');
-            await (job.kind === 'lock' ? runLock() : runOpen());
+            await (job.kind === 'lock' ? runLock() : job.kind === 'hat' ? runHat() : runOpen());
         }
     } catch (error) {
         fail(error);

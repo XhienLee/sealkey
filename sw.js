@@ -6,6 +6,7 @@ const FILES = [
     'js/bundle.js',
     'js/core.js',
     'js/format.js',
+    'js/hatsh.js',
     'js/key.js',
     'js/save.js',
     'js/words.js',

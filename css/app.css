@@ -86,6 +86,8 @@ a:hover { color: var(--ok); }
 .alert::before { content: '!'; flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; background: var(--danger-line); color: var(--bg); font-weight: 700; font-size: 13px; line-height: 20px; text-align: center; }
 .alert-ok { background: var(--ok-bg); border-color: var(--ok-edge); color: var(--ok); font-weight: 500; }
 .alert-ok::before { content: ''; background: none; border-radius: 0; width: 12px; height: 7px; margin: 6px 4px 0 4px; border-left: 2.4px solid var(--accent); border-bottom: 2.4px solid var(--accent); transform: rotate(-45deg); }
+.alert-info { background: var(--surface); border-color: var(--edge); color: var(--body); }
+.alert-info::before { content: 'i'; background: var(--control); color: var(--bg); font-style: italic; font-family: Georgia, serif; }
 .fatal { margin-top: 20px; }
 
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 0 20px; border-radius: 12px; border: 1.5px solid transparent; font: 600 16px var(--sans); cursor: pointer; text-decoration: none; transition: background-color var(--ease), border-color var(--ease), color var(--ease); }
@@ -104,6 +106,7 @@ a:hover { color: var(--ok); }
 
 .drop { background: var(--surface); border: 2px dashed var(--control); border-radius: 16px; padding: clamp(24px, 6vw, 40px) 16px; text-align: center; transition: border-color var(--ease), background-color var(--ease); }
 .drop.over { border-color: var(--accent); background: var(--ok-bg); }
+.drop-note { margin-top: 14px; text-align: center; color: var(--muted); }
 .drop-title { font-weight: 600; font-size: 19px; margin-bottom: 16px; }
 
 .list-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 24px 0 10px; }

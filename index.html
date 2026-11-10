@@ -178,6 +178,7 @@
                 <button type="button" class="btn btn-main" id="open-file-btn">Choose locked file</button>
                 <input class="sr-only" type="file" id="open-file" accept=".seal" tabindex="-1" aria-label="Choose a locked file">
             </div>
+            <p class="note drop-note">Have a .enc file from hat.sh or Hatsmith? <a href="#" data-go="hat">Open it here</a></p>
         </div>
 
         <div class="file-card file-card-boxed" id="open-card" hidden>
@@ -233,6 +234,75 @@
             <p class="small" id="open-again" hidden><a id="open-again-link" href="#">Download didn't start? Save it here.</a></p>
             <button type="button" class="btn btn-main btn-wide" data-go="home">Done</button>
         </div>
+        </div>
+    </section>
+    <section id="view-hat" class="view" aria-labelledby="hat-title" hidden>
+        <p class="alert" id="hat-alert" role="alert" hidden></p>
+
+        <div data-step="pick">
+            <h1 id="hat-title" tabindex="-1">Open a hat.sh file</h1>
+            <p class="lead">For .enc files made with hat.sh or Hatsmith. Sealkey can open them, but it doesn't make them.</p>
+            <div class="drop" id="hat-drop">
+                <p class="drop-title">Drop the .enc file here</p>
+                <button type="button" class="btn btn-main" id="hat-file-btn">Choose .enc file</button>
+                <input class="sr-only" type="file" id="hat-file" tabindex="-1" aria-label="Choose a hat.sh file">
+            </div>
+            <p class="note drop-note">Files locked with a hat.sh key pair can't be opened here yet. Only password files work.</p>
+        </div>
+
+        <div class="file-card file-card-boxed" id="hat-card" hidden>
+            <span class="badge" aria-hidden="true">ENC</span>
+            <span class="file-card-text"><span class="mono" id="hat-in-name"></span><span class="ok small" id="hat-in-size"></span></span>
+            <button type="button" class="btn btn-plain" id="hat-change">Change</button>
+        </div>
+
+        <div data-step="key" hidden>
+            <h1 tabindex="-1">Enter the password</h1>
+            <p class="lead">Use the password the file was locked with on hat.sh. Capitals and spaces matter.</p>
+            <form id="hat-form" novalidate>
+                <label class="label" for="hat-password">Password</label>
+                <div class="key-row">
+                    <input class="field" id="hat-password" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="hat-hint">
+                    <button type="button" class="btn btn-line" id="hat-show" aria-pressed="false">Show</button>
+                </div>
+                <p class="hint" id="hat-hint" aria-live="polite"></p>
+                <button type="submit" class="btn btn-main btn-wide">Open</button>
+            </form>
+        </div>
+
+        <div data-step="checking" class="card center" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <h1 tabindex="-1">Checking the password…</h1>
+            <p class="muted">This can take a few seconds.</p>
+            <button type="button" class="btn btn-line" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="ready" class="card" hidden>
+            <p class="ok small strong">Password accepted</p>
+            <h1 class="wrap-anywhere" id="hat-out-name" tabindex="-1"></h1>
+            <div class="grid-2 facts">
+                <div class="fact"><span class="muted small">Size</span><span class="fact-value" id="hat-out-size"></span></div>
+                <div class="fact"><span class="muted small">Made with</span><span class="fact-value" id="hat-out-version"></span></div>
+            </div>
+            <p class="warn" id="hat-weak"></p>
+            <button type="button" class="btn btn-main btn-wide" id="hat-save-btn"></button>
+            <button type="button" class="btn btn-plain" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="progress" class="card" hidden>
+            <h1 class="wrap-anywhere" id="hat-progress-title" tabindex="-1"></h1>
+            <div class="progress-row"><span>Checking and saving</span><span id="hat-pct">0%</span></div>
+            <progress id="hat-bar" max="100" value="0" aria-label="Opening progress"></progress>
+            <button type="button" class="btn btn-line" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="done" class="card center" hidden>
+            <svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" class="done-ring"/><path d="M16 27l7 7 14-15" fill="none" class="done-tick" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <h1 class="wrap-anywhere" id="hat-done-title" tabindex="-1"></h1>
+            <p class="muted">Every part was checked and is exactly what was locked.</p>
+            <p class="small" id="hat-again" hidden><a id="hat-again-link" href="#">Download didn't start? Save it here.</a></p>
+            <button type="button" class="btn btn-main btn-wide" id="hat-relock">Lock it again with Sealkey</button>
+            <button type="button" class="btn btn-plain" id="hat-finish">Done</button>
         </div>
     </section>
 </main>
