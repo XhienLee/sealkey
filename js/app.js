@@ -3,6 +3,7 @@ import { lockedSize, cleanName, MAX_BUNDLE_FILES, DEFAULTS, KIND_BUNDLE } from '
 import { openSink, sizeLimit, canStream, isMobile, formatSize } from './save.js';
 import { fromFileList, fromDrop, addItems, zipName } from './bundle.js';
 import { predictLength } from '../vendor/client-zip/index.js';
+import { HAT_HEAD_BYTES, HAT_V1_MAX, hatKind, isSealkey, hatOutName } from './hatsh.js';
 
 const MESSAGES = {
     bad_key_format: `Check your key. It should be ${KEY_WORDS} words.`,
@@ -23,6 +24,11 @@ const MESSAGES = {
     save_failed: "Saving didn't finish, so nothing was saved. Check there's enough space and try again.",
     no_files: 'Choose at least one file.',
     unknown: 'Something went wrong, so nothing was saved. Please try again.',
+    wrong_password: 'Wrong password, or the file was changed.',
+    not_hat: "This isn't a hat.sh file.",
+    hat_keypair: 'This hat.sh file was locked with a key pair. Sealkey can only open hat.sh files locked with a password.',
+    is_sealkey: 'This is a Sealkey file. Open it from "Open a locked file".',
+    from_hat: 'This file was made with hat.sh, so it opens here.',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -36,6 +42,7 @@ let busy = false;
 let view = 'home';
 let lock = { items: [], words: [], outName: '', meta: null };
 let open = { file: null, meta: null };
+let hat = { file: null, kind: null, size: 0, name: '' };
 
 function message(code, detail = '') {
     return (MESSAGES[code] || MESSAGES.unknown).replace('{name}', detail || 'a file');
@@ -79,15 +86,16 @@ function go(next) {
     if (!busy && lock.words.length && !confirm("Leave without your key? You won't see it again, and the file can't be opened without it.")) return;
     stopJob();
     view = next;
-    for (const name of ['home', 'lock', 'open']) $(`view-${name}`).hidden = name !== next;
+    for (const name of ['home', 'lock', 'open', 'hat']) $(`view-${name}`).hidden = name !== next;
     document.querySelector('.back').hidden = next === 'home';
     document.querySelector('.tabs').hidden = next === 'home';
     document.querySelectorAll('[data-tab]').forEach((tab) => {
-        if (tab.dataset.tab === next) tab.setAttribute('aria-current', 'page');
+        if (tab.dataset.tab === (next === 'hat' ? 'open' : next)) tab.setAttribute('aria-current', 'page');
         else tab.removeAttribute('aria-current');
     });
     if (next === 'lock') resetLock();
     if (next === 'open') resetOpen();
+    if (next === 'hat') resetHat();
     if (next === 'home') $('home-title').focus();
     window.scrollTo(0, 0);
 }
@@ -328,8 +336,20 @@ function resetOpen(alertText = '') {
     showStep('view-open', 'pick');
 }
 
-function pickLocked(file) {
+async function readHead(file) {
+    try {
+        return new Uint8Array(await file.slice(0, HAT_HEAD_BYTES).arrayBuffer());
+    } catch {
+        return new Uint8Array(0);
+    }
+}
+
+async function pickLocked(file) {
     if (!file) return;
+    if (hatKind(await readHead(file))) {
+        go('hat');
+        return pickHat(file, message('from_hat'));
+    }
     setAlert('open-alert', '');
     open.file = file;
     on({
@@ -457,6 +477,135 @@ async function cancel() {
     await stopJob();
     if (view === 'lock') resetLock(message('cancelled'));
     if (view === 'open') resetOpen(message('cancelled'));
+    if (view === 'hat') resetHat(message('cancelled'));
+}
+
+function resetHat(alertText = '') {
+    hat = { file: null, kind: null, size: 0, name: '' };
+    $('hat-password').value = '';
+    $('hat-password').type = 'password';
+    $('hat-show').textContent = 'Show';
+    $('hat-show').setAttribute('aria-pressed', 'false');
+    $('hat-file').value = '';
+    $('hat-card').hidden = true;
+    setHatHint();
+    $('hat-alert').classList.remove('alert-info');
+    $('hat-alert').setAttribute('role', 'alert');
+    setAlert('hat-alert', alertText);
+    showStep('view-hat', 'pick');
+}
+
+function setHatHint(text = '') {
+    $('hat-hint').textContent = text;
+    $('hat-hint').classList.toggle('bad', Boolean(text));
+    $('hat-password').classList.toggle('invalid', Boolean(text));
+    $('hat-password').setAttribute('aria-invalid', text ? 'true' : 'false');
+}
+
+async function pickHat(file, note = '') {
+    if (!file) return;
+    const head = await readHead(file);
+    const kind = hatKind(head);
+    $('hat-file').value = '';
+    if (!kind) return resetHat(message(isSealkey(head) ? 'is_sealkey' : 'not_hat'));
+    if (kind === 'v2-keypair') return resetHat(message('hat_keypair'));
+    if (kind === 'v1' && file.size > HAT_V1_MAX) return resetHat(message('too_large'));
+    hat = { file, kind, size: 0, name: hatOutName(kind, file.name) };
+    setAlert('hat-alert', note);
+    $('hat-alert').classList.toggle('alert-info', Boolean(note));
+    $('hat-alert').setAttribute('role', note ? 'status' : 'alert');
+    $('hat-in-name').textContent = file.name;
+    $('hat-in-size').textContent = `${formatSize(file.size)} · ${kind === 'v1' ? 'Old hat.sh file (version 1)' : 'hat.sh file found'}`;
+    $('hat-card').hidden = false;
+    setHatHint();
+    showStep('view-hat', 'key');
+    $('hat-password').focus();
+}
+
+function submitHat(event) {
+    event.preventDefault();
+    const password = $('hat-password').value;
+    if (!password) return setHatHint('Enter the password.');
+    setHatHint();
+    $('hat-alert').classList.remove('alert-info');
+    $('hat-alert').setAttribute('role', 'alert');
+    setAlert('hat-alert', '');
+    busy = true;
+    showStep('view-hat', 'checking');
+    on({
+        'hat-ready': ({ size, version }) => {
+            $('hat-password').value = '';
+            if (size > sizeLimit()) {
+                stopJob();
+                return resetHat(message('too_large'));
+            }
+            hat.size = size;
+            $('hat-out-name').textContent = hat.name;
+            $('hat-out-size').textContent = formatSize(size);
+            $('hat-out-version').textContent = version === 'v1' ? 'hat.sh (old version 1)' : 'hat.sh or Hatsmith';
+            $('hat-weak').textContent = version === 'v1'
+                ? "This old file uses protection that's easy to break today. If you still need it protected, lock it again with Sealkey."
+                : "hat.sh files don't hide their file name and use lighter protection than Sealkey. If you still need it protected, lock it again with Sealkey.";
+            $('hat-save-btn').textContent = `Save ${hat.name}`;
+            showStep('view-hat', 'ready');
+        },
+        error: async ({ code }) => {
+            await stopJob();
+            showStep('view-hat', 'key');
+            if (code === 'wrong_password') {
+                setHatHint(message(code));
+                $('hat-password').focus();
+            } else {
+                setAlert('hat-alert', message(code));
+            }
+        },
+    });
+    post({ type: 'hat-prepare', file: hat.file, password });
+}
+
+async function saveHat() {
+    try {
+        sink = await openSink(hat.name);
+    } catch (error) {
+        if (error && error.name === 'AbortError') return;
+        return hatFailed({ code: 'save_failed' });
+    }
+    const total = hat.size;
+    $('hat-progress-title').textContent = `Opening ${hat.name}…`;
+    $('hat-bar').value = 0;
+    $('hat-pct').textContent = '0%';
+    showStep('view-hat', 'progress');
+    on({
+        ...pipeOutput(),
+        progress: ({ done }) => {
+            const pct = total ? Math.floor(done / total * 100) : 100;
+            $('hat-bar').value = pct;
+            $('hat-pct').textContent = `${pct}%`;
+        },
+        done: async () => {
+            try {
+                const result = await sink.close();
+                sink = null;
+                busy = false;
+                $('hat-done-title').textContent = `${hat.name} ${result ? 'downloaded' : 'saved'}`;
+                $('hat-again').hidden = !result;
+                if (result) {
+                    $('hat-again-link').href = result.url;
+                    $('hat-again-link').download = result.name;
+                }
+                showStep('view-hat', 'done');
+            } catch {
+                hatFailed({ code: 'save_failed' });
+            }
+        },
+        error: hatFailed,
+    });
+    post({ type: 'start' });
+}
+
+async function hatFailed({ code }) {
+    await stopJob();
+    resetHat(message(code === 'wrong_password' ? 'damaged' : code));
 }
 
 function dropZone(zone, onFiles) {
@@ -529,6 +678,22 @@ function init() {
     fileInput.addEventListener('change', () => pickLocked(fileInput.files[0]));
     dropZone($('open-drop'), (items, files) => pickLocked(items[0] ? items[0].file : files[0]));
     $('open-change').addEventListener('click', () => resetOpen());
+    const hatInput = $('hat-file');
+    $('hat-file-btn').addEventListener('click', () => hatInput.click());
+    hatInput.addEventListener('change', () => pickHat(hatInput.files[0]));
+    dropZone($('hat-drop'), (items, files) => pickHat(items[0] ? items[0].file : files[0]));
+    $('hat-change').addEventListener('click', () => resetHat());
+    $('hat-form').addEventListener('submit', submitHat);
+    $('hat-password').addEventListener('input', () => setHatHint());
+    $('hat-show').addEventListener('click', () => {
+        const show = $('hat-password').type === 'password';
+        $('hat-password').type = show ? 'text' : 'password';
+        $('hat-show').textContent = show ? 'Hide' : 'Show';
+        $('hat-show').setAttribute('aria-pressed', String(show));
+    });
+    $('hat-save-btn').addEventListener('click', saveHat);
+    $('hat-relock').addEventListener('click', () => go('lock'));
+    $('hat-finish').addEventListener('click', () => go('home'));
     $('open-key').addEventListener('input', () => updateHint());
     $('open-form').addEventListener('submit', submitKey);
     const paste = $('open-paste');
@@ -555,6 +720,7 @@ function init() {
     window.addEventListener('pagehide', () => {
         clearKeyDisplay();
         $('open-key').value = '';
+        $('hat-password').value = '';
     });
     document.documentElement.dataset.save = canStream() ? 'stream' : 'memory';
     registerOffline();

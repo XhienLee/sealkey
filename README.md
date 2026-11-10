@@ -140,6 +140,19 @@ python3 tests/e2e.py http://127.0.0.1:8600/
 
 The Node tests cover key generation, the file format and the encryption, including damaged and changed files. `tests/e2e.py` drives the real app in Chromium with Playwright.
 
+## Opening hat.sh files
+
+Sealkey can open `.enc` files made with [hat.sh](https://github.com/sh-dv/hat.sh) or its fork [Hatsmith](https://github.com/mrtechtroid/hatsmith), so people with old files still have a way to open them. Use "Open it here" under the Open screen, or drop the file on the Open screen and Sealkey sends it to the right place. Sealkey only opens these files. It never makes them.
+
+| hat.sh file | Works | How it was locked |
+|---|---|---|
+| Version 2, password | Yes | Argon2id, then XChaCha20-Poly1305 in 64 MiB chunks |
+| Version 1 (2019 to 2021) | Yes | PBKDF2 (SHA-512, 80,000 rounds, or the earlier SHA-256, 100,000 rounds), then AES-256-GCM |
+| Version 2, key pair | Not yet | X25519 key exchange |
+| The first release from May 2019 | No | Its layout couldn't be confirmed |
+
+These files don't hide their name and use lighter protection than Sealkey files, so Sealkey suggests locking them again. Unlike hat.sh, Sealkey also checks that a version 2 file wasn't cut short. The reader is in `js/hatsh.js`, and `tests/hatsh.test.mjs` builds files the way hat.sh's own code does to test it. hat.sh is MIT licensed; thanks to its authors.
+
 ## Offline and install
 
 After the first visit, Sealkey works with no internet. `sw.js` saves the app's own files in the browser and serves them when the network is gone; when online it always fetches the latest files first. Browsers offer to install it as an app (Install in Chrome and Edge, Share then Add to Home Screen on iPhone).

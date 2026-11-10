@@ -126,6 +126,33 @@ class App:
         p.wait_for_selector('[data-step="done"]:not([hidden])')
         return target, download.value.suggested_filename
 
+    def open_hat(self, path, password, via_open=False):
+        p = self.page
+        self.home()
+        p.click('[data-go="open"]')
+        if via_open:
+            p.set_input_files('#open-file', str(path))
+        else:
+            p.click('[data-go="hat"]')
+            p.set_input_files('#hat-file', str(path))
+        p.wait_for_selector('#view-hat [data-step="key"]:not([hidden]), #hat-alert:not([hidden])')
+        if not p.is_visible('#view-hat [data-step="key"]'):
+            return None, p.inner_text('#hat-alert')
+        note = p.inner_text('#hat-alert') if p.is_visible('#hat-alert') else ''
+        p.fill('#hat-password', password)
+        p.click('#hat-form button[type=submit]')
+        p.wait_for_selector('#view-hat [data-step="ready"]:not([hidden]), #hat-alert:not([hidden]), #hat-hint.bad', timeout=60000)
+        if p.is_visible('#hat-hint.bad'):
+            return None, p.inner_text('#hat-hint')
+        if not p.is_visible('#view-hat [data-step="ready"]'):
+            return None, p.inner_text('#hat-alert')
+        with p.expect_download(timeout=300000) as download:
+            p.click('#hat-save-btn')
+        target = WORK / ('hat-' + download.value.suggested_filename)
+        download.value.save_as(target)
+        p.wait_for_selector('#view-hat [data-step="done"]:not([hidden])')
+        return target, note or download.value.suggested_filename
+
     def close(self):
         self.context.close()
 
@@ -371,6 +398,36 @@ def main():
         check('offline: app loads, locks and opens with no network', bool(opened) and opened.read_bytes() == src.read_bytes(), name)
         check('offline: no console errors', not off.console, off.console[:5])
         off.close()
+
+        hatdir = pathlib.Path(tempfile.mkdtemp())
+        subprocess.run(['node', str(pathlib.Path(__file__).resolve().parent / 'make-hat-files.mjs'), str(hatdir)], check=True, capture_output=True)
+        small = (hatdir / 'plain-small.txt').read_bytes()
+        for mode in ['stream', 'memory']:
+            app = App(browser, mode)
+            label = f'hat.sh-{mode}'
+            opened, name = app.open_hat(hatdir / 'notes.txt.enc', 'hat password')
+            check(f'{label}: v2 file opens with the right name and content', bool(opened) and opened.read_bytes() == small and name == 'notes.txt', name)
+            opened, info = app.open_hat(hatdir / 'notes.txt.enc', 'Hat password')
+            check(f'{label}: wrong password is caught', opened is None and 'Wrong password' in info, info)
+            for old in ['Encrypted-old.txt', 'Encrypted-older.txt']:
+                opened, name = app.open_hat(hatdir / old, 'old password')
+                check(f'{label}: v1 file {old} opens', bool(opened) and opened.read_bytes() == small and name == old.replace('Encrypted-', ''), name)
+            if mode == 'stream':
+                opened, name = app.open_hat(hatdir / 'big.bin.enc', 'hat password')
+                check(f'{label}: v2 file over one 64 MiB chunk opens', bool(opened) and sha(opened.read_bytes()) == sha((hatdir / 'plain-big.bin').read_bytes()), name)
+            _, info = app.open_hat(hatdir / 'keypair.enc', 'x')
+            check(f'{label}: key-pair file gets a clear message', 'key pair' in info, info)
+            _, info = app.open_hat(hatdir / 'plain-small.txt', 'x')
+            check(f'{label}: a non-hat.sh file is refused', "isn't a hat.sh file" in info, info)
+            sealed, key = app.lock(files=[[str(make('for-hat.txt', 100))]])
+            app.finish_lock()
+            _, info = app.open_hat(sealed, 'x')
+            check(f'{label}: a Sealkey file points to the right screen', 'This is a Sealkey file' in info, info)
+            opened, note = app.open_hat(hatdir / 'notes.txt.enc', 'hat password', via_open=True)
+            check(f'{label}: a hat.sh file dropped on Open is sent to the hat.sh screen', bool(opened) and 'made with hat.sh' in note, note)
+            check(f'{label}: no console errors', not app.console, app.console[:5])
+            app.close()
+        shutil.rmtree(hatdir, ignore_errors=True)
         browser.close()
     shutil.rmtree(WORK, ignore_errors=True)
     print(f'{results[0]} passed, {results[1]} failed')
