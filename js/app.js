@@ -69,6 +69,7 @@ function setAlert(id, text) {
 function showStep(viewId, step) {
     const section = $(viewId);
     for (const el of section.querySelectorAll('[data-step]')) el.hidden = el.dataset.step !== step;
+    if (viewId === 'view-open') setRail('view-open', { pick: 1, key: 2, checking: 2, ready: 3, progress: 3, done: 4 }[step] || 1);
     const shown = section.querySelector(`[data-step="${step}"] h1`);
     if (shown) shown.focus({ preventScroll: false });
 }
@@ -80,6 +81,11 @@ function go(next) {
     view = next;
     for (const name of ['home', 'lock', 'open']) $(`view-${name}`).hidden = name !== next;
     document.querySelector('.back').hidden = next === 'home';
+    document.querySelector('.tabs').hidden = next === 'home';
+    document.querySelectorAll('[data-tab]').forEach((tab) => {
+        if (tab.dataset.tab === next) tab.setAttribute('aria-current', 'page');
+        else tab.removeAttribute('aria-current');
+    });
     if (next === 'lock') resetLock();
     if (next === 'open') resetOpen();
     if (next === 'home') $('home-title').focus();
@@ -111,8 +117,18 @@ function pipeOutput() {
     };
 }
 
+function setRail(viewId, n) {
+    $(viewId).querySelectorAll('[data-bar]').forEach((bar) => {
+        const i = Number(bar.dataset.bar);
+        bar.classList.toggle('on', i <= n);
+        bar.classList.toggle('now', i === n);
+        if (i === n && bar.tagName === 'LI') bar.setAttribute('aria-current', 'step');
+        else bar.removeAttribute('aria-current');
+    });
+}
+
 function setBars(n) {
-    document.querySelectorAll('[data-bar]').forEach((bar) => bar.classList.toggle('on', Number(bar.dataset.bar) <= n));
+    setRail('view-lock', n);
 }
 
 function clearKeyDisplay() {
@@ -470,6 +486,10 @@ function init() {
     document.querySelectorAll('[data-go]').forEach((el) => el.addEventListener('click', (event) => {
         event.preventDefault();
         go(el.dataset.go);
+    }));
+    document.querySelectorAll('[data-tab]').forEach((el) => el.addEventListener('click', (event) => {
+        event.preventDefault();
+        go(el.dataset.tab);
     }));
     document.querySelectorAll('[data-cancel]').forEach((el) => el.addEventListener('click', cancel));
 

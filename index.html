@@ -19,6 +19,10 @@
     <a href="#" class="brand" data-go="home">Sealkey</a>
     <a href="#" class="back" data-go="home" hidden>Back</a>
 </header>
+<nav class="tabs" aria-label="Choose a task" hidden>
+    <a href="#" class="tab" data-tab="lock">Lock files</a>
+    <a href="#" class="tab" data-tab="open">Open a locked file</a>
+</nav>
 
 <main class="page">
     <p class="alert fatal" id="fatal" role="alert" hidden></p>
@@ -44,6 +48,7 @@
             </button>
         </div>
 
+        <div class="panels">
         <details class="panel" id="help">
             <summary>How to share safely</summary>
             <ol class="panel-list">
@@ -65,9 +70,19 @@
             </ul>
             <p>Check the code and each release's SHA-256 hash on <a href="https://github.com/XhienLee/sealkey" rel="noreferrer">GitHub</a>.</p>
         </details>
+        </div>
     </section>
 
-    <section id="view-lock" class="view" aria-labelledby="lock-title" hidden>
+    <section id="view-lock" class="view tool" aria-labelledby="lock-title" hidden>
+        <aside class="rail" aria-label="Steps to lock files">
+            <ol class="stepper">
+                <li data-bar="1"><span class="dot">1</span><span class="step-text"><span class="step-name">Choose files</span><span class="step-sub">One file, several or a folder</span></span></li>
+                <li data-bar="2"><span class="dot">2</span><span class="step-text"><span class="step-name">Save the locked file</span><span class="step-sub">Pick where it goes</span></span></li>
+                <li data-bar="3"><span class="dot">3</span><span class="step-text"><span class="step-name">Keep your key</span><span class="step-sub">6 words, shown once</span></span></li>
+            </ol>
+            <p class="rail-note">Everything happens on this device. Nothing is uploaded.</p>
+        </aside>
+        <div class="tool-main">
         <div class="steps" aria-hidden="true"><span data-bar="1"></span><span data-bar="2"></span><span data-bar="3"></span></div>
         <p class="alert" id="lock-alert" role="alert" hidden></p>
 
@@ -136,9 +151,20 @@
             <p class="check-hint" id="key-saved-hint">Tick the box to finish.</p>
             <button type="button" class="btn btn-main btn-wide" id="lock-finish" disabled>Done</button>
         </div>
+        </div>
     </section>
 
-    <section id="view-open" class="view" aria-labelledby="open-title" hidden>
+    <section id="view-open" class="view tool" aria-labelledby="open-title" hidden>
+        <aside class="rail" aria-label="Steps to open a file">
+            <ol class="stepper">
+                <li data-bar="1"><span class="dot">1</span><span class="step-text"><span class="step-name">Choose the .seal file</span><span class="step-sub">The locked file you were sent</span></span></li>
+                <li data-bar="2"><span class="dot">2</span><span class="step-text"><span class="step-name">Enter the key</span><span class="step-sub">The 6 words, sent separately</span></span></li>
+                <li data-bar="3"><span class="dot">3</span><span class="step-text"><span class="step-name">Save the file</span><span class="step-sub">Every part is checked</span></span></li>
+            </ol>
+            <p class="rail-note">Everything happens on this device. Nothing is uploaded.</p>
+        </aside>
+        <div class="tool-main">
+        <div class="steps" aria-hidden="true"><span data-bar="1"></span><span data-bar="2"></span><span data-bar="3"></span></div>
         <p class="alert" id="open-alert" role="alert" hidden></p>
 
         <div data-step="pick">
@@ -203,6 +229,7 @@
             <p class="muted">Every part was checked and is exactly what was locked.</p>
             <p class="small" id="open-again" hidden><a id="open-again-link" href="#">Download didn't start? Save it here.</a></p>
             <button type="button" class="btn btn-main btn-wide" data-go="home">Done</button>
+        </div>
         </div>
     </section>
 </main>
