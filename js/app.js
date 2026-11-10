@@ -557,6 +557,14 @@ function init() {
         $('open-key').value = '';
     });
     document.documentElement.dataset.save = canStream() ? 'stream' : 'memory';
+    registerOffline();
+}
+
+function registerOffline() {
+    if (!('serviceWorker' in navigator)) return;
+    const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+    if (local && !new URLSearchParams(location.search).has('offline')) return;
+    navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
 init();
