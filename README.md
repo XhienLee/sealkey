@@ -4,7 +4,7 @@ Lock files with a 6-word key and open them again, entirely in your browser. File
 
 **Use it now: <https://sealkey.netlify.app>**
 
-Made by Ninth Life Labs. Need a custom website or web app? Get in touch:
+Made by Ninth Life Labs. Need a custom website, a web app, or a basic security check of your site? Get in touch:
 
 [![Facebook](https://img.shields.io/badge/Facebook-Ninth%20Life%20Labs-1877F2?style=for-the-badge&logo=facebook&logoColor=white)](https://www.facebook.com/profile.php?id=61596408329725)
 [![Email](https://img.shields.io/badge/Email-team.ninthlifelabs%40gmail.com-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:team.ninthlifelabs@gmail.com)
