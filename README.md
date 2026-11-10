@@ -140,6 +140,14 @@ python3 tests/e2e.py http://127.0.0.1:8600/
 
 The Node tests cover key generation, the file format and the encryption, including damaged and changed files. `tests/e2e.py` drives the real app in Chromium with Playwright.
 
+## Offline and install
+
+After the first visit, Sealkey works with no internet. `sw.js` saves the app's own files in the browser and serves them when the network is gone; when online it always fetches the latest files first. Browsers offer to install it as an app (Install in Chrome and Edge, Share then Add to Home Screen on iPhone).
+
+The page itself still can't connect anywhere (`connect-src 'none'`). Only `sw.js` may fetch, and only from this site. If you add a file the app loads, add it to the `FILES` list in `sw.js` too.
+
+The service worker is off on `localhost` and `127.0.0.1` so you always get fresh files while editing. Add `?offline` to the address to turn it on locally.
+
 ## How it works
 
 The 6 words are picked with `crypto.getRandomValues` and rejection sampling from 7,772 words, giving about 77.5 bits. Argon2id (3 passes, 64 MiB, a new 16-byte salt per file) turns the key into a 32-byte encryption key. The file is then encrypted with libsodium's XChaCha20-Poly1305 secretstream in 1 MiB chunks, so every chunk is authenticated and any change, reordering or truncation is caught.

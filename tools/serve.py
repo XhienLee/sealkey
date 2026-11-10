@@ -3,23 +3,37 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-HEADERS = []
+RULES = []
 for line in (ROOT / '_headers').read_text().splitlines():
-    if line.startswith(' ') and ':' in line:
+    if line.startswith('/'):
+        RULES.append((line.strip(), []))
+    elif line.startswith(' ') and ':' in line and RULES:
         name, value = line.strip().split(':', 1)
-        HEADERS.append((name.strip(), value.strip()))
+        RULES[-1][1].append((name.strip(), value.strip()))
+
+
+def matches(pattern, path):
+    if pattern.endswith('*'):
+        return path.startswith(pattern[:-1])
+    return path == pattern
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
-    extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, '.js': 'text/javascript', '.mjs': 'text/javascript', '.woff2': 'font/woff2'}
+    extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, '.js': 'text/javascript', '.mjs': 'text/javascript', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json'}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def end_headers(self):
-        for name, value in HEADERS:
-            self.send_header(name, value)
-        self.send_header('Cache-Control', 'no-store')
+        path = self.path.split('?', 1)[0].split('#', 1)[0]
+        sent = set()
+        for pattern, headers in RULES:
+            if matches(pattern, path):
+                for name, value in headers:
+                    self.send_header(name, value)
+                    sent.add(name.lower())
+        if 'cache-control' not in sent:
+            self.send_header('Cache-Control', 'no-store')
         super().end_headers()
 
     def log_message(self, *args):
