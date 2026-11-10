@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>Sealkey: lock files in your browser</title>
+    <meta name="description" content="Lock files with a 6-word key and open them again, entirely in your browser.">
+    <link rel="preload" href="fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/inter-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/inter-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/space-grotesk-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="fonts/jetbrains-mono-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="css/app.css">
+    <script type="module" src="js/app.js"></script>
+</head>
+<body>
+<header class="bar">
+    <a href="#" class="brand" data-go="home">Sealkey</a>
+    <a href="#" class="back" data-go="home" hidden>Back</a>
+</header>
+
+<main class="page">
+    <p class="alert fatal" id="fatal" role="alert" hidden></p>
+
+    <section id="view-home" class="view" aria-labelledby="home-title">
+        <h1 id="home-title" tabindex="-1">Lock files so only your key opens them</h1>
+        <p class="lead lead-check">Your files never leave your device.</p>
+        <div class="choices">
+            <button type="button" class="choice choice-main" data-go="lock">
+                <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="7" y="15" width="20" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M11 15v-4a6 6 0 0 1 12 0v4" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>
+                <span class="choice-title">Lock files</span>
+                <span class="choice-text">Pick files or a folder and get a 6-word key</span>
+            </button>
+            <button type="button" class="choice" data-go="open">
+                <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="7" y="15" width="20" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M11 15v-4a6 6 0 0 1 11.6-2" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>
+                <span class="choice-title">Open a locked file</span>
+                <span class="choice-text">Use the .seal file and the key you were sent</span>
+            </button>
+        </div>
+
+        <details class="panel" id="help">
+            <summary>How to share safely</summary>
+            <ol class="panel-list">
+                <li>Send the locked file one way, such as email or Google Drive.</li>
+                <li>Send the key a different way, such as a message, a call or in person.</li>
+                <li>Keep a copy of the key. If it's lost, nobody can open the file, including us.</li>
+            </ol>
+        </details>
+        <details class="panel" id="about">
+            <summary>About Sealkey</summary>
+            <p>Everything happens in your browser. Files and keys never reach a server, and the page is blocked from sending data anywhere.</p>
+            <p>Each file is locked with XChaCha20-Poly1305 using a key stretched with Argon2id, through the libsodium library. Every part of the file is checked when it's opened, so any change is caught.</p>
+            <p class="panel-strong">Sealkey can't protect you from</p>
+            <ul class="panel-list">
+                <li>A hacked phone or computer</li>
+                <li>Someone who gets both the file and the key</li>
+                <li>A changed version of this website</li>
+                <li>A lost key. Nobody can recover the file.</li>
+            </ul>
+            <p>Check the code and each release's SHA-256 hash on <a href="https://github.com/XhienLee/sealkey" rel="noreferrer">GitHub</a>.</p>
+        </details>
+    </section>
+
+    <section id="view-lock" class="view" aria-labelledby="lock-title" hidden>
+        <div class="steps" aria-hidden="true"><span data-bar="1"></span><span data-bar="2"></span><span data-bar="3"></span></div>
+        <p class="alert" id="lock-alert" role="alert" hidden></p>
+
+        <div data-step="pick">
+            <h1 id="lock-title" tabindex="-1">Lock files</h1>
+            <p class="lead">Choose one file, several files or a whole folder.</p>
+            <div class="drop" id="lock-drop">
+                <p class="drop-title">Drop files or a folder here</p>
+                <div class="row-center">
+                    <button type="button" class="btn btn-main" id="lock-files-btn">Choose files</button>
+                    <button type="button" class="btn btn-line" id="lock-folder-btn">Choose folder</button>
+                </div>
+                <input class="sr-only" type="file" id="lock-files" multiple tabindex="-1" aria-label="Choose files to lock">
+                <input class="sr-only" type="file" id="lock-folder" webkitdirectory tabindex="-1" aria-label="Choose a folder to lock">
+            </div>
+            <div id="lock-list-wrap" hidden>
+                <div class="list-head">
+                    <h2 id="lock-count"></h2>
+                    <span id="lock-total"></span>
+                </div>
+                <ul class="list" id="lock-list"></ul>
+                <p class="note" id="lock-more" hidden></p>
+                <p class="note" id="lock-bundle-note" hidden>These will be packed into one locked file. The person you send it to gets a ZIP.</p>
+                <button type="button" class="btn btn-main btn-wide" id="lock-btn"></button>
+            </div>
+        </div>
+
+        <div data-step="prepare" class="card center" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <h1 tabindex="-1">Making your key</h1>
+            <p class="muted">This takes a few seconds on purpose, so the key is slow to guess.</p>
+            <button type="button" class="btn btn-line" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="save" class="card" hidden>
+            <h1 tabindex="-1">Ready to lock</h1>
+            <p class="lead">Choose where to save the locked file. You'll see the key right after.</p>
+            <div class="file-card">
+                <span class="badge" aria-hidden="true">SEAL</span>
+                <span class="file-card-text"><span class="mono" id="lock-out-name"></span><span class="muted small" id="lock-out-size"></span></span>
+            </div>
+            <button type="button" class="btn btn-main btn-wide" id="lock-save-btn">Save locked file</button>
+            <button type="button" class="btn btn-plain" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="progress" class="card" hidden>
+            <h1 tabindex="-1">Locking…</h1>
+            <p class="muted wrap-anywhere" id="lock-phase" aria-live="polite"></p>
+            <div class="progress-row"><span id="lock-done"></span><span id="lock-pct">0%</span></div>
+            <progress id="lock-bar" max="100" value="0" aria-label="Locking progress"></progress>
+            <p class="muted small">Everything stays on this device.</p>
+            <button type="button" class="btn btn-line" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="key" hidden>
+            <p class="alert alert-ok" id="lock-saved" role="status"></p>
+            <h1 tabindex="-1">Here's your key</h1>
+            <p class="lead">It's the only way to open the file. You won't see it again after you finish.</p>
+            <ol class="key" id="lock-key" aria-label="Your 6-word key"></ol>
+            <div class="grid-2">
+                <button type="button" class="btn btn-line" id="copy-key">Copy key</button>
+                <button type="button" class="btn btn-line" id="copy-message">Copy message for the receiver</button>
+            </div>
+            <p class="warn"><strong>Send the key a different way than the file.</strong> If the file goes by email, send the key by message or call. A lost key can't be recovered.</p>
+            <label class="check"><input type="checkbox" id="key-saved"> I saved my key</label>
+            <button type="button" class="btn btn-main btn-wide" id="lock-finish" disabled>Done</button>
+        </div>
+    </section>
+
+    <section id="view-open" class="view" aria-labelledby="open-title" hidden>
+        <p class="alert" id="open-alert" role="alert" hidden></p>
+
+        <div data-step="pick">
+            <h1 id="open-title" tabindex="-1">Open a locked file</h1>
+            <p class="lead">You need the .seal file and its 6-word key.</p>
+            <div class="drop" id="open-drop">
+                <p class="drop-title">Drop the .seal file here</p>
+                <button type="button" class="btn btn-main" id="open-file-btn">Choose locked file</button>
+                <input class="sr-only" type="file" id="open-file" accept=".seal" tabindex="-1" aria-label="Choose a locked file">
+            </div>
+        </div>
+
+        <div class="file-card file-card-boxed" id="open-card" hidden>
+            <span class="badge" aria-hidden="true">SEAL</span>
+            <span class="file-card-text"><span class="mono" id="open-in-name"></span><span class="ok small" id="open-in-size"></span></span>
+            <button type="button" class="btn btn-plain" id="open-change">Change</button>
+        </div>
+
+        <div data-step="key" hidden>
+            <h1 tabindex="-1">Enter the key</h1>
+            <p class="lead">Type or paste the 6 words you were sent. Capitals and spaces don't matter.</p>
+            <form id="open-form" novalidate>
+                <label class="label" for="open-key">Key</label>
+                <div class="key-row">
+                    <input class="field mono" id="open-key" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="tiger-mango-velvet-…" aria-describedby="open-hint">
+                    <button type="button" class="btn btn-line" id="open-paste">Paste</button>
+                </div>
+                <p class="hint" id="open-hint" aria-live="polite"></p>
+                <button type="submit" class="btn btn-main btn-wide">Open</button>
+            </form>
+        </div>
+
+        <div data-step="checking" class="card center" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <h1 tabindex="-1">Checking your key…</h1>
+            <p class="muted">This takes a few seconds on purpose, to slow down guessing.</p>
+            <button type="button" class="btn btn-line" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="ready" class="card" hidden>
+            <p class="ok small strong">Key accepted</p>
+            <h1 class="wrap-anywhere" id="open-out-name" tabindex="-1"></h1>
+            <div class="grid-2 facts">
+                <div class="fact"><span class="muted small">Contains</span><span class="fact-value" id="open-out-count"></span></div>
+                <div class="fact"><span class="muted small">Size</span><span class="fact-value" id="open-out-size"></span></div>
+            </div>
+            <p class="muted" id="open-zip-note" hidden>You'll get a ZIP file. Open it with your usual ZIP tool to see the files.</p>
+            <button type="button" class="btn btn-main btn-wide" id="open-save-btn"></button>
+            <button type="button" class="btn btn-plain" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="progress" class="card" hidden>
+            <h1 class="wrap-anywhere" id="open-progress-title" tabindex="-1"></h1>
+            <div class="progress-row"><span>Checking and saving</span><span id="open-pct">0%</span></div>
+            <progress id="open-bar" max="100" value="0" aria-label="Opening progress"></progress>
+            <button type="button" class="btn btn-line" data-cancel>Cancel</button>
+        </div>
+
+        <div data-step="done" class="card center" hidden>
+            <svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" class="done-ring"/><path d="M16 27l7 7 14-15" fill="none" class="done-tick" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <h1 class="wrap-anywhere" id="open-done-title" tabindex="-1"></h1>
+            <p class="muted">Every part was checked and is exactly what was locked.</p>
+            <p class="small" id="open-again" hidden><a id="open-again-link" href="#">Download didn't start? Save it here.</a></p>
+            <button type="button" class="btn btn-main btn-wide" data-go="home">Done</button>
+        </div>
+    </section>
+</main>
+
+<footer class="footer">
+    <a href="https://github.com/XhienLee/sealkey" rel="noreferrer">Source code</a> · Version <span id="version">1.0.0</span>
+</footer>
+</body>
+</html>
