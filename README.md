@@ -4,6 +4,11 @@ Lock files with a 6-word key and open them again, entirely in your browser. File
 
 **Use it now: <https://sealkey.netlify.app>**
 
+Made by Ninth Life Labs. Need a custom website or web app? Get in touch:
+
+[![Facebook](https://img.shields.io/badge/Facebook-Ninth%20Life%20Labs-1877F2?style=for-the-badge&logo=facebook&logoColor=white)](https://www.facebook.com/profile.php?id=61596408329725)
+[![Email](https://img.shields.io/badge/Email-team.ninthlifelabs%40gmail.com-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:team.ninthlifelabs@gmail.com)
+
 1. Choose one file, several files or a folder. Sealkey creates a 6-word key and saves one `.seal` file.
 2. Send the `.seal` file one way (email, Drive) and the key another way (a message, a call, in person).
 3. The receiver opens Sealkey, picks the file, types the key and saves the original file, or a ZIP when several files were locked.
@@ -192,13 +197,6 @@ The output should match the hash on the release page.
 - [libsodium.js](https://github.com/jedisct1/libsodium.js) 0.8.4 (`libsodium-wrappers-sumo`), ISC license, in `vendor/libsodium/`. The only change is the import path in `libsodium-wrappers.mjs`, so it loads the local `libsodium-sumo.mjs`.
 - [client-zip](https://github.com/Touffy/client-zip) 2.5.1, MIT license, in `vendor/client-zip/`.
 - Inter, Space Grotesk and JetBrains Mono fonts, SIL Open Font License 1.1, in `fonts/`.
-
-## Need a custom website?
-
-Sealkey is made by Ninth Life Labs. If you'd like a custom website or web app built for you, get in touch:
-
-- Facebook: <https://www.facebook.com/profile.php?id=61596408329725>
-- Email: team.ninthlifelabs@gmail.com
 
 ## License
 
