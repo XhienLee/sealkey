@@ -2,6 +2,8 @@
 
 Lock files with a 6-word key and open them again, entirely in your browser. Files and keys never reach a server.
 
+**Use it now: <https://sealkey.netlify.app>**
+
 1. Choose one file, several files or a folder. Sealkey creates a 6-word key and saves one `.seal` file.
 2. Send the `.seal` file one way (email, Drive) and the key another way (a message, a call, in person).
 3. The receiver opens Sealkey, picks the file, types the key and saves the original file, or a ZIP when several files were locked.
