@@ -1,7 +1,10 @@
 export const MAGIC = 'SEAL';
 export const VERSION = 1;
 export const KDF_ARGON2ID = 1;
+export const KDF_X25519 = 2;
 export const HEADER_BYTES = 58;
+export const KEY_HEADER_BYTES = 90;
+export const PUBLIC_KEY_BYTES = 32;
 export const META_BYTES = 512;
 export const SS_HEADER_BYTES = 24;
 export const SS_ABYTES = 17;
@@ -33,18 +36,20 @@ export class SealError extends Error {
     }
 }
 
-export function encodeHeader({ passes, memKiB, chunkBytes, salt, ssHeader }) {
+export function encodeHeader({ passes, memKiB, chunkBytes, salt, ssHeader, ephemeral = null }) {
     if (salt.length !== SALT_BYTES || ssHeader.length !== SS_HEADER_BYTES) throw new Error('header fields');
-    const out = new Uint8Array(HEADER_BYTES);
+    if (ephemeral && ephemeral.length !== PUBLIC_KEY_BYTES) throw new Error('header fields');
+    const out = new Uint8Array(ephemeral ? KEY_HEADER_BYTES : HEADER_BYTES);
     const view = new DataView(out.buffer);
     out.set(new TextEncoder().encode(MAGIC), 0);
     out[4] = VERSION;
-    out[5] = KDF_ARGON2ID;
-    view.setUint32(6, passes, true);
-    view.setUint32(10, memKiB, true);
+    out[5] = ephemeral ? KDF_X25519 : KDF_ARGON2ID;
+    view.setUint32(6, ephemeral ? 0 : passes, true);
+    view.setUint32(10, ephemeral ? 0 : memKiB, true);
     view.setUint32(14, chunkBytes, true);
     out.set(salt, 18);
     out.set(ssHeader, 34);
+    if (ephemeral) out.set(ephemeral, HEADER_BYTES);
     return out;
 }
 
@@ -52,21 +57,31 @@ export function parseHeader(bytes) {
     if (bytes.length < HEADER_BYTES) throw new SealError('not_locked');
     if (new TextDecoder().decode(bytes.subarray(0, 4)) !== MAGIC) throw new SealError('not_locked');
     if (bytes[4] > VERSION) throw new SealError('newer_version');
-    if (bytes[4] !== VERSION || bytes[5] !== KDF_ARGON2ID) throw new SealError('unsafe_header');
+    const kdf = bytes[5];
+    if (bytes[4] !== VERSION || (kdf !== KDF_ARGON2ID && kdf !== KDF_X25519)) throw new SealError('unsafe_header');
+    const size = kdf === KDF_X25519 ? KEY_HEADER_BYTES : HEADER_BYTES;
+    if (bytes.length < size) throw new SealError('incomplete');
     const view = new DataView(bytes.buffer, bytes.byteOffset, HEADER_BYTES);
     const passes = view.getUint32(6, true);
     const memKiB = view.getUint32(10, true);
     const chunkBytes = view.getUint32(14, true);
-    if (passes < 1 || passes > LIMITS.maxPasses) throw new SealError('unsafe_header');
-    if (memKiB < LIMITS.minMemKiB || memKiB > LIMITS.maxMemKiB) throw new SealError('unsafe_header');
+    if (kdf === KDF_ARGON2ID) {
+        if (passes < 1 || passes > LIMITS.maxPasses) throw new SealError('unsafe_header');
+        if (memKiB < LIMITS.minMemKiB || memKiB > LIMITS.maxMemKiB) throw new SealError('unsafe_header');
+    } else if (passes !== 0 || memKiB !== 0) {
+        throw new SealError('unsafe_header');
+    }
     if (chunkBytes < LIMITS.minChunkBytes || chunkBytes > LIMITS.maxChunkBytes) throw new SealError('unsafe_header');
     return {
-        bytes: bytes.slice(0, HEADER_BYTES),
+        bytes: bytes.slice(0, size),
+        size,
+        kdf,
         passes,
         memKiB,
         chunkBytes,
         salt: bytes.slice(18, 34),
         ssHeader: bytes.slice(34, 58),
+        ephemeral: kdf === KDF_X25519 ? bytes.slice(HEADER_BYTES, KEY_HEADER_BYTES) : null,
     };
 }
 
@@ -120,8 +135,8 @@ export function chunkCount(size, chunkBytes) {
     return Math.max(1, Math.ceil(size / chunkBytes));
 }
 
-export function lockedSize(size, chunkBytes) {
-    return HEADER_BYTES + META_BYTES + SS_ABYTES + size + SS_ABYTES * chunkCount(size, chunkBytes);
+export function lockedSize(size, chunkBytes, headerBytes = HEADER_BYTES) {
+    return headerBytes + META_BYTES + SS_ABYTES + size + SS_ABYTES * chunkCount(size, chunkBytes);
 }
 
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f<>:"|?*\\]/g;

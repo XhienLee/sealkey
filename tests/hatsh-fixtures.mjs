@@ -41,3 +41,23 @@ export async function makeV1(plain, password, { hash = 'SHA-512', iterations = 8
     const body = new Uint8Array(await subtle.encrypt({ iv, name: 'AES-GCM' }, key, plain));
     return concat([text('Encrypted Using Hat.sh'), iv, salt, body]);
 }
+
+export function makeKeys(s) {
+    const pair = s.crypto_kx_keypair();
+    return { publicKey: s.to_base64(pair.publicKey), privateKey: s.to_base64(pair.privateKey) };
+}
+
+export function makeV2KeyPair(s, plain, senderPrivate, receiverPublic, chunk = HAT_CHUNK) {
+    const csk = s.from_base64(senderPrivate);
+    const keys = s.crypto_kx_client_session_keys(s.crypto_scalarmult_base(csk), csk, s.from_base64(receiverPublic));
+    const { state, header } = s.crypto_secretstream_xchacha20poly1305_init_push(keys.sharedTx);
+    const parts = [text('hTWKbfoikeg'), header];
+    const count = Math.max(1, Math.ceil(plain.length / chunk));
+    for (let i = 0; i < count; i += 1) {
+        const tag = i === count - 1
+            ? s.crypto_secretstream_xchacha20poly1305_TAG_FINAL
+            : s.crypto_secretstream_xchacha20poly1305_TAG_MESSAGE;
+        parts.push(s.crypto_secretstream_xchacha20poly1305_push(state, plain.subarray(i * chunk, (i + 1) * chunk), null, tag));
+    }
+    return concat(parts);
+}

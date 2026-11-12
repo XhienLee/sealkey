@@ -4,6 +4,8 @@ import { openSink, sizeLimit, canStream, isMobile, formatSize } from './save.js'
 import { fromFileList, fromDrop, addItems, zipName } from './bundle.js';
 import { predictLength } from '../vendor/client-zip/index.js';
 import { HAT_HEAD_BYTES, HAT_V1_MAX, hatKind, isSealkey, hatOutName } from './hatsh.js';
+import { KDF_X25519 } from './format.js';
+import { SECRET_WORDS } from './keypair.js';
 
 const MESSAGES = {
     bad_key_format: `Check your key. It should be ${KEY_WORDS} words.`,
@@ -26,9 +28,17 @@ const MESSAGES = {
     unknown: 'Something went wrong, so nothing was saved. Please try again.',
     wrong_password: 'Wrong password, or the file was changed.',
     not_hat: "This isn't a hat.sh file.",
-    hat_keypair: 'This hat.sh file was locked with a key pair. Sealkey can only open hat.sh files locked with a password.',
     is_sealkey: 'This is a Sealkey file. Open it from "Open a locked file".',
     from_hat: 'This file was made with hat.sh, so it opens here.',
+    bad_public_key: "That isn't a Sealkey public key. Ask them to copy it again from \"My key\".",
+    bad_secret_words: `Check your words. There should be ${SECRET_WORDS} words from Sealkey's list.`,
+    wrong_words: "These words don't open this file. Check them and try again.",
+    needs_secret_words: 'This file was locked for a public key. Open it with your 12 secret words.',
+    needs_key: 'This file needs its 6-word key.',
+    bad_hat_key: "That doesn't look like a hat.sh key. hat.sh keys are 43 characters long.",
+    wrong_hat_keys: "These keys don't open this file. Use your private key and the sender's public key.",
+    hat_own_key: "That's your own public key. Paste the sender's public key instead.",
+    copy_failed: 'Copying was blocked. Select the key and copy it yourself.',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -41,7 +51,8 @@ let sink = null;
 let busy = false;
 let view = 'home';
 let lock = { items: [], words: [], outName: '', meta: null };
-let open = { file: null, meta: null };
+let open = { file: null, meta: null, words: KEY_WORDS };
+let keys = { shown: false };
 let hat = { file: null, kind: null, size: 0, name: '' };
 
 function message(code, detail = '') {
@@ -81,12 +92,75 @@ function showStep(viewId, step) {
     if (shown) shown.focus({ preventScroll: false });
 }
 
-function go(next) {
-    if (busy && !confirm('Stop and discard this job?')) return;
-    if (!busy && lock.words.length && !confirm("Leave without your key? You won't see it again, and the file can't be opened without it.")) return;
+function stepShown(viewId, step) {
+    return !$(viewId).hidden && !document.querySelector(`#${viewId} [data-step="${step}"]`).hidden;
+}
+
+function keyOnScreen() {
+    return lock.words.length > 0 && stepShown('view-lock', 'key') && !$('key-saved').checked;
+}
+
+function wordsOnScreen() {
+    return keys.shown && stepShown('view-keys', 'words') && !$('keys-saved').checked;
+}
+
+const LEAVE = {
+    job: {
+        title: 'Stop and leave?',
+        text: "Sealkey is still working. If you leave now, it stops and nothing is saved.",
+        stay: 'Keep going',
+        leave: 'Stop and leave',
+    },
+    key: {
+        title: 'Leave without your key?',
+        text: "You won't see this key again, and the file can't be opened without it.",
+        stay: 'Stay and save my key',
+        leave: 'Leave anyway',
+    },
+    words: {
+        title: 'Leave without your 12 words?',
+        text: "You won't see them again, and files sent to your public key can't be opened without them.",
+        stay: 'Stay and write them down',
+        leave: 'Leave anyway',
+    },
+};
+
+let asking = null;
+
+function ask({ title, text, stay, leave }) {
+    const dialog = $('ask');
+    if (typeof dialog.showModal !== 'function') return Promise.resolve(confirm(`${title}\n\n${text}`));
+    if (asking) return asking;
+    $('ask-title').textContent = title;
+    $('ask-text').textContent = text;
+    $('ask-stay').textContent = stay;
+    $('ask-leave').textContent = leave;
+    asking = new Promise((resolve) => {
+        const finish = (answer) => {
+            dialog.removeEventListener('close', onClose);
+            asking = null;
+            resolve(answer);
+        };
+        const onClose = () => finish(dialog.returnValue === 'leave');
+        dialog.returnValue = '';
+        dialog.addEventListener('close', onClose);
+        dialog.showModal();
+        $('ask-stay').focus();
+    });
+    return asking;
+}
+
+async function go(next) {
+    const reason = busy ? 'job' : keyOnScreen() ? 'key' : wordsOnScreen() ? 'words' : null;
+    if (reason && !(await ask(LEAVE[reason]))) return;
     stopJob();
+    if (view === 'lock') clearKeyDisplay();
+    if (view === 'keys') {
+        keys = { shown: false };
+        $('keys-secret').replaceChildren();
+    }
     view = next;
-    for (const name of ['home', 'lock', 'open', 'hat']) $(`view-${name}`).hidden = name !== next;
+    for (const name of ['home', 'lock', 'open', 'hat', 'keys']) $(`view-${name}`).hidden = name !== next;
     document.querySelector('.back').hidden = next === 'home';
     document.querySelector('.tabs').hidden = next === 'home';
     document.querySelectorAll('[data-tab]').forEach((tab) => {
@@ -96,6 +170,7 @@ function go(next) {
     if (next === 'lock') resetLock();
     if (next === 'open') resetOpen();
     if (next === 'hat') resetHat();
+    if (next === 'keys') resetKeys();
     if (next === 'home') $('home-title').focus();
     window.scrollTo(0, 0);
 }
@@ -149,7 +224,15 @@ function clearKeyDisplay() {
 
 function resetLock(alertText = '') {
     clearKeyDisplay();
-    lock = { items: [], words: [], outName: '', meta: null };
+    lock = { items: [], words: [], outName: '', meta: null, method: 'words', recipient: '', fingerprint: [] };
+    document.querySelector('input[name="lock-method"][value="words"]').checked = true;
+    $('lock-public').hidden = true;
+    $('lock-public-key').value = '';
+    setPublicHint();
+    $('lock-fp-wrap').hidden = true;
+    $('lock-fp-checked').checked = false;
+    document.querySelector('#view-lock .stepper [data-bar="3"] .step-name').textContent = 'Keep your key';
+    document.querySelector('#view-lock .stepper [data-bar="3"] .step-sub').textContent = '6 words, shown once';
     renderList();
     setAlert('lock-alert', alertText);
     setBars(1);
@@ -195,6 +278,53 @@ function renderList() {
     $('lock-total').textContent = `${formatSize(total)} total`;
     $('lock-bundle-note').hidden = items.length < 2;
     $('lock-btn').textContent = items.length === 1 ? 'Lock this file' : `Lock ${items.length.toLocaleString('en-US')} files`;
+    updateLockButton();
+}
+
+function updateLockButton() {
+    $('lock-btn').disabled = lock.method === 'public' && !(lock.recipient && $('lock-fp-checked').checked);
+}
+
+function setPublicHint(text = 'Ask them for it. They get one under "My key".', state = '') {
+    $('lock-public-hint').textContent = text;
+    $('lock-public-hint').className = `hint ${state}`;
+    $('lock-public-key').classList.toggle('invalid', state === 'bad');
+    $('lock-public-key').setAttribute('aria-invalid', state === 'bad' ? 'true' : 'false');
+}
+
+function setLockMethod(method) {
+    lock.method = method;
+    $('lock-public').hidden = method !== 'public';
+    const public_ = method === 'public';
+    document.querySelector('#view-lock .stepper [data-bar="3"] .step-name').textContent = public_ ? 'Send the file' : 'Keep your key';
+    document.querySelector('#view-lock .stepper [data-bar="3"] .step-sub').textContent = public_ ? 'Nothing else to send' : '6 words, shown once';
+    updateLockButton();
+}
+
+function checkPublicKey() {
+    const text = $('lock-public-key').value.trim();
+    lock.recipient = '';
+    lock.fingerprint = [];
+    $('lock-fp-wrap').hidden = true;
+    $('lock-fp-checked').checked = false;
+    updateLockButton();
+    if (!text) return setPublicHint();
+    on({
+        'public-ok': ({ fingerprint }) => {
+            if ($('lock-public-key').value.trim() !== text) return;
+            lock.recipient = text;
+            lock.fingerprint = fingerprint;
+            renderWords($('lock-fp'), fingerprint);
+            $('lock-fp-wrap').hidden = false;
+            setPublicHint('Public key looks right.', 'good');
+            updateLockButton();
+        },
+        error: ({ code }) => {
+            if ($('lock-public-key').value.trim() !== text) return;
+            setPublicHint(message(code), 'bad');
+        },
+    });
+    post({ type: 'check-public', text });
 }
 
 function addToLock(incoming) {
@@ -224,10 +354,16 @@ function startLock() {
     if (items.length === 0) return setAlert('lock-alert', message('no_files'));
     if (items.length > MAX_BUNDLE_FILES) return setAlert('lock-alert', message('too_many_files'));
     if (plannedSize(items) > sizeLimit()) return setAlert('lock-alert', message(items.length > 1 ? 'bundle_too_large' : 'too_large'));
+    const forKey = lock.method === 'public';
+    if (forKey && !(lock.recipient && $('lock-fp-checked').checked)) return;
     setAlert('lock-alert', '');
-    lock.words = makeKeyWords();
+    lock.words = forKey ? [] : makeKeyWords();
     lock.outName = randomName();
     busy = true;
+    document.querySelector('#view-lock [data-step="prepare"] h1').textContent = forKey ? 'Locking for their key' : 'Making your key';
+    document.querySelector('#view-lock [data-step="prepare"] .muted').textContent = forKey
+        ? 'This only takes a moment.'
+        : 'This takes a few seconds on purpose, so the key is slow to guess.';
     showStep('view-lock', 'prepare');
     on({
         prepared: ({ outSize, meta }) => {
@@ -242,7 +378,8 @@ function startLock() {
     post({
         type: 'lock-prepare',
         items: items.map(({ file, path }) => ({ file, path })),
-        keyText: lock.words.join('-'),
+        keyText: forKey ? null : lock.words.join('-'),
+        recipientText: forKey ? lock.recipient : null,
         zipName: zipName(items),
     });
 }
@@ -280,12 +417,113 @@ async function finishLockSave() {
         const result = await sink.close();
         sink = null;
         busy = false;
+        setBars(3);
+        if (lock.method === 'public') {
+            $('lock-sent-text').textContent = `${lock.outName} was ${result ? 'downloaded' : 'saved'}. Send it to them any way you like. Only their 12 secret words can open it.`;
+            $('lock-sent-fp').textContent = `Their key: ${lock.fingerprint.join('-')}`;
+            showStep('view-lock', 'sent');
+            return;
+        }
         $('lock-saved').textContent = `${lock.outName} was ${result ? 'downloaded' : 'saved'}.`;
         renderKey();
-        setBars(3);
         showStep('view-lock', 'key');
     } catch {
         lockFailed({ code: 'save_failed' });
+    }
+}
+
+function renderWords(list, words) {
+    list.replaceChildren();
+    words.forEach((word, i) => {
+        const li = document.createElement('li');
+        const n = document.createElement('span');
+        n.className = 'key-n';
+        n.textContent = String(i + 1);
+        const w = document.createElement('span');
+        w.className = 'key-word';
+        w.textContent = word;
+        li.append(n, w);
+        list.append(li);
+    });
+}
+
+function resetKeys(alertText = '') {
+    keys = { shown: false };
+    $('keys-secret').replaceChildren();
+    $('keys-saved').checked = false;
+    $('keys-next').disabled = true;
+    $('keys-words').value = '';
+    $('keys-public').textContent = '';
+    $('keys-copy').textContent = 'Copy public key';
+    setKeysHint();
+    setAlert('keys-alert', alertText);
+    showStep('view-keys', 'start');
+}
+
+function setKeysHint(text = '', state = '') {
+    $('keys-hint').textContent = text;
+    $('keys-hint').className = `hint ${state}`;
+    $('keys-words').classList.toggle('invalid', state === 'bad');
+    $('keys-words').setAttribute('aria-invalid', state === 'bad' ? 'true' : 'false');
+}
+
+function showPublic(publicKey, fingerprint) {
+    $('keys-public').textContent = publicKey;
+    renderWords($('keys-fp'), fingerprint);
+    showStep('view-keys', 'public');
+}
+
+function makeKeys(words = null) {
+    setAlert('keys-alert', '');
+    busy = true;
+    showStep('view-keys', 'making');
+    on({
+        keypair: ({ words: secret, publicKey, fingerprint }) => {
+            busy = false;
+            $('keys-words').value = '';
+            if (secret) {
+                keys.shown = true;
+                keys.publicKey = publicKey;
+                keys.fingerprint = fingerprint;
+                renderWords($('keys-secret'), secret);
+                showStep('view-keys', 'words');
+            } else {
+                showPublic(publicKey, fingerprint);
+            }
+        },
+        error: async ({ code }) => {
+            await stopJob();
+            showStep('view-keys', 'start');
+            if (code === 'bad_secret_words') {
+                setKeysHint(message(code), 'bad');
+                $('keys-words').focus();
+            } else {
+                setAlert('keys-alert', message(code));
+            }
+        },
+    });
+    post({ type: 'make-keypair', words });
+}
+
+function showFromWords(event) {
+    event.preventDefault();
+    const words = normalizeKey($('keys-words').value);
+    if (!isKeyValid(words, SECRET_WORDS)) return setKeysHint(message('bad_secret_words'), 'bad');
+    setKeysHint();
+    makeKeys(words);
+}
+
+async function copyPublic() {
+    try {
+        await navigator.clipboard.writeText($('keys-public').textContent);
+        $('keys-copy').textContent = 'Copied';
+    } catch {
+        const range = document.createRange();
+        range.selectNodeContents($('keys-public'));
+        const selection = getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        $('keys-copy').textContent = 'Press copy on your device';
     }
 }
 
@@ -326,8 +564,23 @@ async function copyText(text, button, label) {
     }
 }
 
+function setOpenWords(count) {
+    open.words = count;
+    const forKey = count === SECRET_WORDS;
+    const step = document.querySelector('#view-open [data-step="key"]');
+    step.querySelector('h1').textContent = forKey ? 'Enter your 12 secret words' : 'Enter the key';
+    step.querySelector('.lead').textContent = forKey
+        ? 'This file was locked for your public key. Type the 12 secret words that made it. Capitals and spaces don\'t matter.'
+        : 'Type or paste the 6 words you were sent. Capitals and spaces don\'t matter.';
+    $('open-key').placeholder = forKey ? 'your 12 secret words' : 'tiger-mango-velvet-…';
+    document.querySelector('label[for="open-key"]').textContent = forKey ? 'Your 12 secret words' : 'Key';
+    document.querySelector('#view-open .stepper [data-bar="2"] .step-name').textContent = forKey ? 'Enter your 12 words' : 'Enter the key';
+    document.querySelector('#view-open .stepper [data-bar="2"] .step-sub').textContent = forKey ? 'The secret words behind your public key' : 'The 6 words, sent separately';
+}
+
 function resetOpen(alertText = '') {
-    open = { file: null, meta: null };
+    open = { file: null, meta: null, words: KEY_WORDS };
+    setOpenWords(KEY_WORDS);
     $('open-key').value = '';
     $('open-file').value = '';
     $('open-card').hidden = true;
@@ -353,7 +606,9 @@ async function pickLocked(file) {
     setAlert('open-alert', '');
     open.file = file;
     on({
-        'header-ok': () => {
+        'header-ok': ({ header }) => {
+            setOpenWords(header.kdf === KDF_X25519 ? SECRET_WORDS : KEY_WORDS);
+            updateHint();
             $('open-in-name').textContent = file.name;
             $('open-in-size').textContent = `${formatSize(file.size)} · Locked file found`;
             $('open-card').hidden = false;
@@ -374,16 +629,17 @@ function updateHint(errorText = '') {
     const input = $('open-key');
     const key = normalizeKey(input.value);
     const parts = countKeyParts(key);
-    let text = 'For example: tiger-mango-velvet-cloud-pebble-lantern';
+    const need = open.words;
+    let text = need === SECRET_WORDS ? 'The 12 words you wrote down when you made your key.' : 'For example: tiger-mango-velvet-cloud-pebble-lantern';
     let state = '';
     if (errorText) {
         text = errorText;
         state = 'bad';
-    } else if (parts > 0 && isKeyValid(key)) {
-        text = `${KEY_WORDS} words. Ready to open.`;
+    } else if (parts > 0 && isKeyValid(key, need)) {
+        text = `${need} words. Ready to open.`;
         state = 'good';
     } else if (parts > 0) {
-        text = parts > KEY_WORDS ? `That's ${parts} words. The key has ${KEY_WORDS}.` : `${parts} of ${KEY_WORDS} words`;
+        text = parts > need ? `That's ${parts} words. You need ${need}.` : `${parts} of ${need} words`;
     }
     hint.textContent = text;
     hint.className = `hint ${state}`;
@@ -394,7 +650,7 @@ function updateHint(errorText = '') {
 function submitKey(event) {
     event.preventDefault();
     const key = normalizeKey($('open-key').value);
-    if (!isKeyValid(key)) return updateHint(message('bad_key_format'));
+    if (!isKeyValid(key, open.words)) return updateHint(open.words === SECRET_WORDS ? message('bad_secret_words') : message('bad_key_format'));
     setAlert('open-alert', '');
     busy = true;
     showStep('view-open', 'checking');
@@ -418,7 +674,7 @@ function submitKey(event) {
             await stopJob();
             showStep('view-open', 'key');
             if (code === 'wrong_key') {
-                updateHint(message(code));
+                updateHint(message(open.words === SECRET_WORDS ? 'wrong_words' : code));
                 $('open-key').focus();
             } else {
                 setAlert('open-alert', message(code));
@@ -483,6 +739,9 @@ async function cancel() {
 function resetHat(alertText = '') {
     hat = { file: null, kind: null, size: 0, name: '' };
     $('hat-password').value = '';
+    $('hat-private').value = '';
+    $('hat-sender').value = '';
+    setHatKeysHint();
     $('hat-password').type = 'password';
     $('hat-show').textContent = 'Show';
     $('hat-show').setAttribute('aria-pressed', 'false');
@@ -508,7 +767,6 @@ async function pickHat(file, note = '') {
     const kind = hatKind(head);
     $('hat-file').value = '';
     if (!kind) return resetHat(message(isSealkey(head) ? 'is_sealkey' : 'not_hat'));
-    if (kind === 'v2-keypair') return resetHat(message('hat_keypair'));
     if (kind === 'v1' && file.size > HAT_V1_MAX) return resetHat(message('too_large'));
     hat = { file, kind, size: 0, name: hatOutName(kind, file.name) };
     setAlert('hat-alert', note);
@@ -518,8 +776,33 @@ async function pickHat(file, note = '') {
     $('hat-in-size').textContent = `${formatSize(file.size)} · ${kind === 'v1' ? 'Old hat.sh file (version 1)' : 'hat.sh file found'}`;
     $('hat-card').hidden = false;
     setHatHint();
+    if (kind === 'v2-keypair') {
+        $('hat-in-size').textContent = `${formatSize(file.size)} · hat.sh key-pair file`;
+        setHatKeysHint();
+        showStep('view-hat', 'keys');
+        $('hat-private').focus();
+        return;
+    }
     showStep('view-hat', 'key');
     $('hat-password').focus();
+}
+
+function setHatKeysHint(text = '') {
+    $('hat-keys-hint').textContent = text;
+    $('hat-keys-hint').classList.toggle('bad', Boolean(text));
+    for (const id of ['hat-private', 'hat-sender']) {
+        $(id).classList.toggle('invalid', Boolean(text));
+        $(id).setAttribute('aria-invalid', text ? 'true' : 'false');
+    }
+}
+
+function submitHatKeys(event) {
+    event.preventDefault();
+    const privateKey = $('hat-private').value.trim();
+    const publicKey = $('hat-sender').value.trim();
+    if (!privateKey || !publicKey) return setHatKeysHint('Paste both keys.');
+    setHatKeysHint();
+    runHatPrepare({ privateKey, publicKey });
 }
 
 function submitHat(event) {
@@ -527,6 +810,13 @@ function submitHat(event) {
     const password = $('hat-password').value;
     if (!password) return setHatHint('Enter the password.');
     setHatHint();
+    runHatPrepare({ password });
+}
+
+function runHatPrepare(secrets) {
+    const byKeys = 'privateKey' in secrets;
+    document.querySelector('#view-hat [data-step="checking"] h1').textContent = byKeys ? 'Checking the keys…' : 'Checking the password…';
+    document.querySelector('#view-hat [data-step="ready"] .ok').textContent = byKeys ? 'Keys accepted' : 'Password accepted';
     $('hat-alert').classList.remove('alert-info');
     $('hat-alert').setAttribute('role', 'alert');
     setAlert('hat-alert', '');
@@ -535,6 +825,7 @@ function submitHat(event) {
     on({
         'hat-ready': ({ size, version }) => {
             $('hat-password').value = '';
+            $('hat-private').value = '';
             if (size > sizeLimit()) {
                 stopJob();
                 return resetHat(message('too_large'));
@@ -542,7 +833,7 @@ function submitHat(event) {
             hat.size = size;
             $('hat-out-name').textContent = hat.name;
             $('hat-out-size').textContent = formatSize(size);
-            $('hat-out-version').textContent = version === 'v1' ? 'hat.sh (old version 1)' : 'hat.sh or Hatsmith';
+            $('hat-out-version').textContent = version === 'v1' ? 'hat.sh (old version 1)' : version === 'v2-keypair' ? 'hat.sh key pair' : 'hat.sh or Hatsmith';
             $('hat-weak').textContent = version === 'v1'
                 ? "This old file uses protection that's easy to break today. If you still need it protected, lock it again with Sealkey."
                 : "hat.sh files don't hide their file name and use lighter protection than Sealkey. If you still need it protected, lock it again with Sealkey.";
@@ -551,16 +842,19 @@ function submitHat(event) {
         },
         error: async ({ code }) => {
             await stopJob();
-            showStep('view-hat', 'key');
+            showStep('view-hat', byKeys ? 'keys' : 'key');
             if (code === 'wrong_password') {
                 setHatHint(message(code));
                 $('hat-password').focus();
+            } else if (['wrong_hat_keys', 'hat_own_key', 'bad_hat_key'].includes(code)) {
+                setHatKeysHint(message(code));
+                $('hat-private').focus();
             } else {
                 setAlert('hat-alert', message(code));
             }
         },
     });
-    post({ type: 'hat-prepare', file: hat.file, password });
+    post({ type: 'hat-prepare', file: hat.file, ...secrets });
 }
 
 async function saveHat() {
@@ -605,7 +899,7 @@ async function saveHat() {
 
 async function hatFailed({ code }) {
     await stopJob();
-    resetHat(message(code === 'wrong_password' ? 'damaged' : code));
+    resetHat(message(code === 'wrong_password' || code === 'wrong_hat_keys' ? 'damaged' : code));
 }
 
 function dropZone(zone, onFiles) {
@@ -692,6 +986,29 @@ function init() {
         $('hat-show').setAttribute('aria-pressed', String(show));
     });
     $('hat-save-btn').addEventListener('click', saveHat);
+    $('hat-keys-form').addEventListener('submit', submitHatKeys);
+    $('ask-stay').addEventListener('click', () => $('ask').close('stay'));
+    $('ask-leave').addEventListener('click', () => $('ask').close('leave'));
+    $('ask').addEventListener('click', (event) => {
+        if (event.target === $('ask')) $('ask').close('stay');
+    });
+    $('hat-private').addEventListener('input', () => setHatKeysHint());
+    $('hat-sender').addEventListener('input', () => setHatKeysHint());
+    document.querySelectorAll('input[name="lock-method"]').forEach((radio) => radio.addEventListener('change', () => setLockMethod(radio.value)));
+    $('lock-public-key').addEventListener('input', checkPublicKey);
+    $('lock-fp-checked').addEventListener('change', updateLockButton);
+    $('lock-sent-done').addEventListener('click', () => go('home'));
+    $('keys-make').addEventListener('click', () => makeKeys());
+    $('keys-form').addEventListener('submit', showFromWords);
+    $('keys-words').addEventListener('input', () => setKeysHint());
+    $('keys-saved').addEventListener('change', (event) => { $('keys-next').disabled = !event.target.checked; });
+    $('keys-next').addEventListener('click', () => {
+        keys.shown = false;
+        $('keys-secret').replaceChildren();
+        showPublic(keys.publicKey, keys.fingerprint);
+    });
+    $('keys-copy').addEventListener('click', copyPublic);
+    $('keys-done').addEventListener('click', () => go('home'));
     $('hat-relock').addEventListener('click', () => go('lock'));
     $('hat-finish').addEventListener('click', () => go('home'));
     $('open-key').addEventListener('input', () => updateHint());
@@ -712,7 +1029,7 @@ function init() {
     $('open-save-btn').addEventListener('click', saveOpened);
 
     window.addEventListener('beforeunload', (event) => {
-        if (busy || lock.words.length) {
+        if (busy || keyOnScreen() || wordsOnScreen()) {
             event.preventDefault();
             event.returnValue = '';
         }
@@ -721,6 +1038,9 @@ function init() {
         clearKeyDisplay();
         $('open-key').value = '';
         $('hat-password').value = '';
+        $('hat-private').value = '';
+        $('keys-secret').replaceChildren();
+        $('keys-words').value = '';
     });
     document.documentElement.dataset.save = canStream() ? 'stream' : 'memory';
     registerOffline();

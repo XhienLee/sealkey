@@ -25,6 +25,7 @@
 <nav class="tabs" aria-label="Choose a task" hidden>
     <a href="#" class="tab" data-tab="lock">Lock files</a>
     <a href="#" class="tab" data-tab="open">Open a locked file</a>
+    <a href="#" class="tab" data-tab="keys">My key</a>
 </nav>
 
 <main class="page">
@@ -50,6 +51,8 @@
                 <span class="choice-text">Use the .seal file and the key you were sent</span>
             </button>
         </div>
+
+        <p class="note home-keys">Want people to lock files for you without sending you a key? <a href="#" data-go="keys">Get your public key</a></p>
 
         <div class="panels">
         <details class="panel" id="help">
@@ -109,6 +112,21 @@
                 <ul class="list" id="lock-list"></ul>
                 <p class="note" id="lock-more" hidden></p>
                 <p class="note" id="lock-bundle-note" hidden>These will be packed into one locked file. The person you send it to gets a ZIP.</p>
+                <fieldset class="method">
+                    <legend class="label">How will they open it?</legend>
+                    <label class="method-option"><input type="radio" name="lock-method" value="words" checked><span><span class="method-title">With a new 6-word key</span><span class="method-text">You send them the key a different way than the file.</span></span></label>
+                    <label class="method-option"><input type="radio" name="lock-method" value="public"><span><span class="method-title">With their public key</span><span class="method-text">Nothing to send. They open it with their 12 secret words.</span></span></label>
+                </fieldset>
+                <div id="lock-public" hidden>
+                    <label class="label" for="lock-public-key">Their public key</label>
+                    <textarea class="field mono pubkey-field" id="lock-public-key" rows="2" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="sealkey-pub-…" aria-describedby="lock-public-hint"></textarea>
+                    <p class="hint" id="lock-public-hint" aria-live="polite">Ask them for it. They get one under "My key".</p>
+                    <div id="lock-fp-wrap" hidden>
+                        <p class="label">Check these 6 words with them by call or in person</p>
+                        <ol class="key key-small" id="lock-fp" aria-label="Their key's 6-word fingerprint"></ol>
+                        <label class="check"><input type="checkbox" id="lock-fp-checked"> They read me the same 6 words</label>
+                    </div>
+                </div>
                 <button type="button" class="btn btn-main btn-wide" id="lock-btn"></button>
             </div>
         </div>
@@ -153,6 +171,14 @@
             <label class="check"><input type="checkbox" id="key-saved"> I saved my key somewhere safe</label>
             <p class="check-hint" id="key-saved-hint">Tick the box to finish.</p>
             <button type="button" class="btn btn-main btn-wide" id="lock-finish" disabled>Done</button>
+        </div>
+
+        <div data-step="sent" class="card center" hidden>
+            <svg width="52" height="52" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" class="done-ring"/><path d="M16 27l7 7 14-15" fill="none" class="done-tick" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <h1 tabindex="-1">Locked for their key</h1>
+            <p class="muted" id="lock-sent-text"></p>
+            <p class="small muted" id="lock-sent-fp"></p>
+            <button type="button" class="btn btn-main btn-wide" id="lock-sent-done">Done</button>
         </div>
         </div>
     </section>
@@ -236,6 +262,50 @@
         </div>
         </div>
     </section>
+    <section id="view-keys" class="view" aria-labelledby="keys-title" hidden>
+        <p class="alert" id="keys-alert" role="alert" hidden></p>
+
+        <div data-step="start">
+            <h1 id="keys-title" tabindex="-1">Your public key</h1>
+            <p class="lead">Share a public key so people can lock files for you without sending you a key. Sealkey makes it from 12 secret words and never saves them.</p>
+            <button type="button" class="btn btn-main btn-wide" id="keys-make">Make my key</button>
+            <form class="card keys-again" id="keys-form" novalidate>
+                <h2>Already have your 12 words?</h2>
+                <p class="muted small">Type them to see your public key again.</p>
+                <label class="label" for="keys-words">Your 12 secret words</label>
+                <textarea class="field mono pubkey-field" id="keys-words" rows="2" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="keys-hint"></textarea>
+                <p class="hint" id="keys-hint" aria-live="polite"></p>
+                <button type="submit" class="btn btn-line">Show my public key</button>
+            </form>
+        </div>
+
+        <div data-step="making" class="card center" hidden>
+            <div class="spinner" aria-hidden="true"></div>
+            <h1 tabindex="-1">Making your key</h1>
+            <p class="muted">This takes a few seconds on purpose.</p>
+        </div>
+
+        <div data-step="words" hidden>
+            <h1 tabindex="-1">Your 12 secret words</h1>
+            <p class="lead">They're the only way to open files sent to your public key. Write them down and keep them safe. Sealkey won't show them again.</p>
+            <ol class="key" id="keys-secret" aria-label="Your 12 secret words"></ol>
+            <p class="warn"><strong>Never share these words.</strong> Share only your public key. If you lose the words, nobody can open files sent to you.</p>
+            <label class="check"><input type="checkbox" id="keys-saved"> I wrote down my 12 words</label>
+            <button type="button" class="btn btn-main btn-wide" id="keys-next" disabled>Show my public key</button>
+        </div>
+
+        <div data-step="public" hidden>
+            <h1 tabindex="-1">Your public key</h1>
+            <p class="lead">Share it with anyone who wants to send you files. It's safe to post publicly.</p>
+            <p class="pubkey mono" id="keys-public"></p>
+            <button type="button" class="btn btn-line" id="keys-copy">Copy public key</button>
+            <p class="label label-gap">Your 6-word fingerprint</p>
+            <ol class="key key-small" id="keys-fp" aria-label="Your 6-word fingerprint"></ol>
+            <p class="note">When someone locks a file for you, they see these 6 words. Read them out together by call or in person, so you both know nobody swapped your key.</p>
+            <button type="button" class="btn btn-main btn-wide" id="keys-done">Done</button>
+        </div>
+    </section>
+
     <section id="view-hat" class="view" aria-labelledby="hat-title" hidden>
         <p class="alert" id="hat-alert" role="alert" hidden></p>
 
@@ -247,7 +317,7 @@
                 <button type="button" class="btn btn-main" id="hat-file-btn">Choose .enc file</button>
                 <input class="sr-only" type="file" id="hat-file" tabindex="-1" aria-label="Choose a hat.sh file">
             </div>
-            <p class="note drop-note">Files locked with a hat.sh key pair can't be opened here yet. Only password files work.</p>
+            <p class="note drop-note">Works with hat.sh password files, key-pair files and old version 1 files.</p>
         </div>
 
         <div class="file-card file-card-boxed" id="hat-card" hidden>
@@ -266,6 +336,19 @@
                     <button type="button" class="btn btn-line" id="hat-show" aria-pressed="false">Show</button>
                 </div>
                 <p class="hint" id="hat-hint" aria-live="polite"></p>
+                <button type="submit" class="btn btn-main btn-wide">Open</button>
+            </form>
+        </div>
+
+        <div data-step="keys" hidden>
+            <h1 tabindex="-1">Enter the keys</h1>
+            <p class="lead">This hat.sh file was locked with a key pair. Paste your private key and the sender's public key.</p>
+            <form id="hat-keys-form" novalidate>
+                <label class="label" for="hat-private">Your private key</label>
+                <input class="field mono" id="hat-private" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="hat-keys-hint">
+                <label class="label label-gap" for="hat-sender">Sender's public key</label>
+                <input class="field mono" id="hat-sender" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="hat-keys-hint">
+                <p class="hint" id="hat-keys-hint" aria-live="polite"></p>
                 <button type="submit" class="btn btn-main btn-wide">Open</button>
             </form>
         </div>
@@ -306,6 +389,16 @@
         </div>
     </section>
 </main>
+
+<dialog class="ask" id="ask" aria-labelledby="ask-title" aria-describedby="ask-text">
+    <div class="ask-icon" aria-hidden="true">!</div>
+    <h2 id="ask-title"></h2>
+    <p id="ask-text"></p>
+    <div class="ask-buttons">
+        <button type="button" class="btn btn-main" id="ask-stay"></button>
+        <button type="button" class="btn btn-line ask-leave" id="ask-leave"></button>
+    </div>
+</dialog>
 
 <footer class="footer">
     <div class="footer-in">

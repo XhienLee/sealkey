@@ -140,6 +140,19 @@ python3 tests/e2e.py http://127.0.0.1:8600/
 
 The Node tests cover key generation, the file format and the encryption, including damaged and changed files. `tests/e2e.py` drives the real app in Chromium with Playwright.
 
+## Key pairs
+
+Instead of a 6-word key, you can lock a file for someone's **public key**. Then there's nothing secret to send: they open it with their own 12 secret words.
+
+1. The receiver opens "My key" and picks "Make my key". Sealkey shows 12 secret words once and never saves them. From those words it makes a public key such as `sealkey-pub-…` and a 6-word fingerprint.
+2. The receiver shares the public key. It's safe to post anywhere.
+3. The sender locks files with "With their public key", pastes it, and reads the 6-word fingerprint with the receiver by call or in person before locking. That check makes sure nobody swapped the key on the way.
+4. The receiver opens the file with their 12 secret words. Typing the words under "My key" shows the same public key again.
+
+How it works: the 12 words (about 155 bits) go through Argon2id (3 passes, 64 MiB) to make an X25519 private key. Each file gets a new one-time X25519 key; the file key is a BLAKE2b hash of the shared secret, both public keys and the file's salt, and the rest of the file is the same XChaCha20-Poly1305 format as a 6-word file. The one-time public key sits after the usual header (90 bytes instead of 58), and the whole header is checked when the file opens. Only the receiver has a lasting key, so a sender's device has nothing to leak, and senders can't reopen what they sent. Nothing about the receiver is stored in the file or the browser.
+
+If the 12 words are lost, nobody can open files sent to that public key.
+
 ## Opening hat.sh files
 
 Sealkey can open `.enc` files made with [hat.sh](https://github.com/sh-dv/hat.sh) or its fork [Hatsmith](https://github.com/mrtechtroid/hatsmith), so people with old files still have a way to open them. Use "Open it here" under the Open screen, or drop the file on the Open screen and Sealkey sends it to the right place. Sealkey only opens these files. It never makes them.
@@ -148,7 +161,7 @@ Sealkey can open `.enc` files made with [hat.sh](https://github.com/sh-dv/hat.sh
 |---|---|---|
 | Version 2, password | Yes | Argon2id, then XChaCha20-Poly1305 in 64 MiB chunks |
 | Version 1 (2019 to 2021) | Yes | PBKDF2 (SHA-512, 80,000 rounds, or the earlier SHA-256, 100,000 rounds), then AES-256-GCM |
-| Version 2, key pair | Not yet | X25519 key exchange |
+| Version 2, key pair | Yes, with your private key and the sender's public key | X25519 key exchange (libsodium `crypto_kx`) |
 | The first release from May 2019 | No | Its layout couldn't be confirmed |
 
 These files don't hide their name and use lighter protection than Sealkey files, so Sealkey suggests locking them again. Unlike hat.sh, Sealkey also checks that a version 2 file wasn't cut short. The reader is in `js/hatsh.js`, and `tests/hatsh.test.mjs` builds files the way hat.sh's own code does to test it. hat.sh is MIT licensed; thanks to its authors.

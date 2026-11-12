@@ -66,8 +66,14 @@ class App:
         self.page.goto(BASE)
         self.page.wait_for_selector('#home-title')
 
+    def leave_if_asked(self):
+        self.page.wait_for_timeout(50)
+        if self.page.is_visible('#ask'):
+            self.page.click('#ask-leave')
+
     def home(self):
         self.page.click('.brand')
+        self.leave_if_asked()
         self.page.wait_for_selector('#view-home:not([hidden])')
 
     def lock(self, files=None, folder=None, save=True):
@@ -135,15 +141,22 @@ class App:
         else:
             p.click('[data-go="hat"]')
             p.set_input_files('#hat-file', str(path))
-        p.wait_for_selector('#view-hat [data-step="key"]:not([hidden]), #hat-alert:not([hidden])')
-        if not p.is_visible('#view-hat [data-step="key"]'):
+        p.wait_for_selector('#view-hat [data-step="key"]:not([hidden]), #view-hat [data-step="keys"]:not([hidden]), #hat-alert:not([hidden])')
+        if not (p.is_visible('#view-hat [data-step="key"]') or p.is_visible('#view-hat [data-step="keys"]')):
             return None, p.inner_text('#hat-alert')
         note = p.inner_text('#hat-alert') if p.is_visible('#hat-alert') else ''
-        p.fill('#hat-password', password)
-        p.click('#hat-form button[type=submit]')
-        p.wait_for_selector('#view-hat [data-step="ready"]:not([hidden]), #hat-alert:not([hidden]), #hat-hint.bad', timeout=60000)
+        if isinstance(password, tuple):
+            p.fill('#hat-private', password[0])
+            p.fill('#hat-sender', password[1])
+            p.click('#hat-keys-form button[type=submit]')
+        else:
+            p.fill('#hat-password', password)
+            p.click('#hat-form button[type=submit]')
+        p.wait_for_selector('#view-hat [data-step="ready"]:not([hidden]), #hat-alert:not([hidden]), #hat-hint.bad, #hat-keys-hint.bad', timeout=60000)
         if p.is_visible('#hat-hint.bad'):
             return None, p.inner_text('#hat-hint')
+        if p.is_visible('#hat-keys-hint.bad'):
+            return None, p.inner_text('#hat-keys-hint')
         if not p.is_visible('#view-hat [data-step="ready"]'):
             return None, p.inner_text('#hat-alert')
         with p.expect_download(timeout=300000) as download:
@@ -415,8 +428,13 @@ def main():
             if mode == 'stream':
                 opened, name = app.open_hat(hatdir / 'big.bin.enc', 'hat password')
                 check(f'{label}: v2 file over one 64 MiB chunk opens', bool(opened) and sha(opened.read_bytes()) == sha((hatdir / 'plain-big.bin').read_bytes()), name)
-            _, info = app.open_hat(hatdir / 'keypair.enc', 'x')
-            check(f'{label}: key-pair file gets a clear message', 'key pair' in info, info)
+            keyfile = lambda name: (hatdir / name).read_text().strip()
+            opened, name = app.open_hat(hatdir / 'shared.txt.enc', (keyfile('receiver-private.txt'), keyfile('sender-public.txt')))
+            check(f'{label}: hat.sh key-pair file opens', bool(opened) and opened.read_bytes() == small and name == 'shared.txt', name)
+            _, info = app.open_hat(hatdir / 'shared.txt.enc', (keyfile('receiver-private.txt'), keyfile('receiver-public.txt')))
+            check(f'{label}: own public key is caught', 'your own public key' in info, info)
+            _, info = app.open_hat(hatdir / 'shared.txt.enc', (keyfile('sender-public.txt'), keyfile('receiver-public.txt')))
+            check(f'{label}: wrong hat.sh keys are caught', "don't open this file" in info, info)
             _, info = app.open_hat(hatdir / 'plain-small.txt', 'x')
             check(f'{label}: a non-hat.sh file is refused', "isn't a hat.sh file" in info, info)
             sealed, key = app.lock(files=[[str(make('for-hat.txt', 100))]])
@@ -428,6 +446,125 @@ def main():
             check(f'{label}: no console errors', not app.console, app.console[:5])
             app.close()
         shutil.rmtree(hatdir, ignore_errors=True)
+
+        app = App(browser, 'stream')
+        p = app.page
+        native = []
+        p.on('dialog', lambda d: native.append(d.message))
+
+        def prompts(action):
+            action()
+            p.wait_for_timeout(300)
+            if not p.is_visible('#ask'):
+                return []
+            title = p.inner_text('#ask-title')
+            p.click('#ask-leave')
+            p.wait_for_timeout(100)
+            return [title]
+
+        app.home()
+        p.click('[data-go="lock"]')
+        p.set_input_files('#lock-files', str(make('warn.txt', 100)))
+        p.click('#lock-btn')
+        p.wait_for_selector('[data-step="save"]:not([hidden])', timeout=60000)
+        got = prompts(lambda: p.click('[data-tab="open"]'))
+        check('warnings: leaving before saving asks once to stop the job', len(got) == 1 and 'Stop and leave' in got[0], got)
+        got = prompts(lambda: p.click('[data-tab="lock"]'))
+        check('warnings: coming back to Lock after discarding asks nothing', got == [], got)
+        p.set_input_files('#lock-files', str(make('warn2.txt', 100)))
+        p.click('#lock-btn')
+        p.wait_for_selector('[data-step="save"]:not([hidden])', timeout=60000)
+        with p.expect_download(timeout=60000):
+            p.click('#lock-save-btn')
+        p.wait_for_selector('#view-lock [data-step="key"]:not([hidden])')
+        got = prompts(lambda: p.click('[data-tab="open"]'))
+        check('warnings: leaving a key on screen asks once', len(got) == 1 and 'without your key' in got[0], got)
+        got = prompts(lambda: p.click('[data-tab="lock"]'))
+        check('warnings: after leaving the key, Lock asks nothing', got == [], got)
+        p.set_input_files('#lock-files', str(make('warn3.txt', 100)))
+        p.click('#lock-btn')
+        p.wait_for_selector('[data-step="save"]:not([hidden])', timeout=60000)
+        with p.expect_download(timeout=60000):
+            p.click('#lock-save-btn')
+        p.wait_for_selector('#view-lock [data-step="key"]:not([hidden])')
+        p.check('#key-saved')
+        got = prompts(lambda: p.click('[data-tab="open"]'))
+        check('warnings: a key marked as saved leaves without asking', got == [], got)
+        p.click('[data-tab="keys"]')
+        p.click('#keys-make')
+        p.wait_for_selector('#keys-secret li', timeout=60000)
+        got = prompts(lambda: p.click('[data-tab="lock"]'))
+        check('warnings: leaving the 12 words asks once', len(got) == 1 and '12 words' in got[0], got)
+        got = prompts(lambda: p.click('[data-tab="open"]'))
+        check('warnings: after leaving the 12 words, nothing else asks', got == [], got)
+        p.click('[data-tab="keys"]')
+        check('warnings: My key starts fresh with no words left on the page', p.is_visible('#keys-make') and p.locator('#keys-secret li').count() == 0)
+        p.click('#keys-make')
+        p.wait_for_selector('#keys-secret li', timeout=60000)
+        p.click('[data-tab="lock"]')
+        p.wait_for_selector('#ask', state='visible')
+        p.keyboard.press('Escape')
+        p.wait_for_timeout(200)
+        check('warnings: Esc on the dialog keeps you on the page', not p.is_visible('#ask') and p.is_visible('#keys-secret'))
+        p.click('[data-tab="lock"]')
+        p.wait_for_selector('#ask', state='visible')
+        focused = p.evaluate('document.activeElement.id')
+        p.click('#ask-stay')
+        p.wait_for_timeout(200)
+        check('warnings: the safe button has focus and keeps you on the page', focused == 'ask-stay' and p.is_visible('#keys-secret'), focused)
+        check('warnings: no browser popups are used', native == [], native)
+        app.close()
+
+        for mode in ['stream', 'memory']:
+            app = App(browser, mode)
+            p = app.page
+            label = f'key pair-{mode}'
+            app.home()
+            p.click('[data-go="keys"]')
+            p.click('#keys-make')
+            p.wait_for_selector('#keys-secret li', timeout=60000)
+            secret = p.locator('#keys-secret .key-word').all_inner_texts()
+            check(f'{label}: 12 secret words are shown', len(secret) == 12, secret)
+            check(f'{label}: public key waits for the saved tick', p.is_disabled('#keys-next'))
+            p.check('#keys-saved')
+            p.click('#keys-next')
+            pub = p.inner_text('#keys-public')
+            fp = p.locator('#keys-fp .key-word').all_inner_texts()
+            check(f'{label}: public key and 6-word fingerprint shown', pub.startswith('sealkey-pub-') and len(fp) == 6, (pub, fp))
+            app.home()
+            p.click('[data-go="lock"]')
+            src = make('for-key.bin', 3 * MIB)
+            p.set_input_files('#lock-files', str(src))
+            p.check('input[name="lock-method"][value="public"]')
+            p.fill('#lock-public-key', pub[:-2] + ('A' if pub[-2] != 'A' else 'B') + pub[-1])
+            p.wait_for_selector('#lock-public-hint.bad')
+            check(f'{label}: a mistyped public key is caught', p.is_disabled('#lock-btn'))
+            p.fill('#lock-public-key', pub)
+            p.wait_for_selector('#lock-fp li')
+            check(f'{label}: sender sees the same fingerprint', p.locator('#lock-fp .key-word').all_inner_texts() == fp)
+            check(f'{label}: lock waits for the fingerprint tick', p.is_disabled('#lock-btn'))
+            p.check('#lock-fp-checked')
+            p.click('#lock-btn')
+            p.wait_for_selector('[data-step="save"]:not([hidden])', timeout=60000)
+            with p.expect_download(timeout=300000) as download:
+                p.click('#lock-save-btn')
+            sealed = WORK / ('key-' + download.value.suggested_filename)
+            download.value.save_as(sealed)
+            p.wait_for_selector('#view-lock [data-step="sent"]:not([hidden])')
+            check(f'{label}: no 6-word key is shown for a public-key file', not p.is_visible('#lock-key li'))
+            p.click('#lock-sent-done')
+            opened, info = app.open(sealed, ' '.join(reversed(secret)))
+            check(f'{label}: wrong 12 words are caught', opened is None and "don't open this file" in info, info)
+            opened, name = app.open(sealed, '-'.join(secret).upper())
+            check(f'{label}: file locked for the public key opens with the 12 words', bool(opened) and sha(opened.read_bytes()) == sha(src.read_bytes()), name)
+            app.home()
+            p.click('[data-go="keys"]')
+            p.fill('#keys-words', ' '.join(secret))
+            p.click('#keys-form button[type=submit]')
+            p.wait_for_selector('#view-keys [data-step="public"]:not([hidden])', timeout=60000)
+            check(f'{label}: the same words give the same public key', p.inner_text('#keys-public') == pub)
+            check(f'{label}: no console errors', not app.console, app.console[:5])
+            app.close()
         browser.close()
     shutil.rmtree(WORK, ignore_errors=True)
     print(f'{results[0]} passed, {results[1]} failed')

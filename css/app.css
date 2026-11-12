@@ -155,6 +155,28 @@ progress::-moz-progress-bar { background: var(--accent); }
 .check input { width: 22px; height: 22px; margin: 1px 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
 .check-hint { margin-top: 8px; font-size: 14px; color: var(--muted); }
 
+.label-gap { margin-top: 16px; }
+.method { border: 0; margin: 22px 0 0; padding: 0; display: grid; gap: 8px; }
+.method legend { padding: 0; }
+.method-option { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1.5px solid var(--edge); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color var(--ease); }
+.method-option:hover { border-color: var(--control); }
+.method-option:has(input:checked) { border-color: var(--accent); background: var(--ok-bg); }
+.method-option input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.method-option > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.method-title { font-weight: 600; }
+.method-text { font-size: 14px; color: var(--muted); }
+#lock-public { margin-top: 16px; }
+#lock-fp-wrap { margin-top: 18px; }
+#hat-private, #hat-sender { width: 100%; display: block; }
+.field.pubkey-field { width: 100%; min-height: 0; resize: vertical; font-size: 15px; line-height: 1.5; display: block; }
+.pubkey { margin: 0 0 12px; padding: 14px 16px; border-radius: 12px; background: var(--sunken); border: 1px solid var(--edge); font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; user-select: all; }
+.key-small { padding: 8px; margin-bottom: 4px; }
+.key-small li { padding: 8px 10px; }
+.key-small .key-word { font-size: 16px; }
+.home-keys { text-align: center; margin-top: 18px; }
+.keys-again { margin-top: 28px; display: grid; gap: 4px; }
+.keys-again h2 { margin: 0; }
+.keys-again .btn { justify-self: start; margin-top: 4px; }
 .label { display: block; font-weight: 600; font-size: 15px; margin-bottom: 8px; }
 .key-row { display: flex; gap: 8px; }
 .field { flex: 1; min-width: 0; min-height: 56px; padding: 12px 16px; font-size: 17px; color: var(--text); background: var(--surface); border: 2px solid var(--control); border-radius: 12px; transition: border-color var(--ease); }
@@ -174,6 +196,18 @@ progress::-moz-progress-bar { background: var(--accent); }
 .done-tick { stroke: var(--accent); }
 #open-again { margin-top: 12px; }
 
+.ask { width: min(420px, calc(100% - 32px)); margin: auto; padding: 28px 24px 24px; border: 1px solid var(--edge); border-radius: 18px; background: var(--surface); color: var(--text); text-align: center; box-shadow: 0 24px 60px rgba(2, 6, 23, 0.6); }
+.ask::backdrop { background: rgba(2, 6, 23, 0.72); backdrop-filter: blur(3px); }
+.ask[open] { animation: ask-in 160ms ease-out; }
+@keyframes ask-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.ask-icon { width: 48px; height: 48px; margin: 0 auto 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--warn-bg); border: 1px solid var(--warn-edge); color: var(--warn); font-size: 24px; font-weight: 700; }
+.ask h2 { font-size: 21px; margin: 0 0 8px; }
+.ask p { color: var(--muted); margin: 0 0 22px; }
+.ask-buttons { display: grid; gap: 10px; }
+.ask-buttons .btn { width: 100%; min-height: 50px; }
+.ask-leave { color: var(--danger); border-color: var(--danger-edge); }
+.ask-leave:hover { border-color: var(--danger-line); }
+
 @media (max-width: 380px) {
     .key-row { flex-wrap: wrap; }
     .key-row .field { flex-basis: 100%; }
@@ -187,7 +221,7 @@ progress::-moz-progress-bar { background: var(--accent); }
 .view { max-width: 640px; margin: 0 auto; }
 
 .tabs { width: 100%; max-width: 1040px; margin: 0 auto; padding: 12px 20px 0; display: flex; gap: 6px; }
-.tab { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 16px; border-radius: 10px; font-weight: 600; font-size: 15px; color: var(--muted); text-decoration: none; background: var(--surface); border: 1px solid var(--edge); transition: background-color var(--ease), color var(--ease), border-color var(--ease); }
+.tab { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; min-height: 48px; padding: 4px 10px; line-height: 1.25; border-radius: 10px; font-weight: 600; font-size: 15px; color: var(--muted); text-decoration: none; background: var(--surface); border: 1px solid var(--edge); transition: background-color var(--ease), color var(--ease), border-color var(--ease); }
 .tab:hover { color: var(--text); border-color: var(--control); }
 .tab[aria-current="page"] { background: var(--raised); color: var(--text); border-color: var(--control); box-shadow: inset 0 -2px 0 var(--accent); }
 
