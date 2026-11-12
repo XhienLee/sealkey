@@ -11,6 +11,8 @@ const ABYTES = 17;
 const V2_SALT_AT = 11;
 const V2_HEADER_AT = 27;
 const V2_BODY_AT = 51;
+const V2_KEYPAIR_HEADER_AT = 11;
+const V2_KEYPAIR_BODY_AT = 35;
 const V1_IV_AT = 22;
 const V1_SALT_AT = 38;
 const V1_BODY_AT = 54;
@@ -47,8 +49,8 @@ export function hatOutName(kind, fileName) {
     return cleanName(name, 'file');
 }
 
-export function hatV2Layout(fileSize, chunk = HAT_CHUNK) {
-    const body = fileSize - V2_BODY_AT;
+export function hatV2Layout(fileSize, chunk = HAT_CHUNK, bodyAt = V2_BODY_AT) {
+    const body = fileSize - bodyAt;
     if (body < ABYTES) throw new SealError('incomplete');
     const full = chunk + ABYTES;
     const chunks = Math.ceil(body / full);
@@ -57,28 +59,21 @@ export function hatV2Layout(fileSize, chunk = HAT_CHUNK) {
     return { chunks, full, plainSize: body - chunks * ABYTES };
 }
 
-export async function prepareHatV2(sodium, password, readAt, fileSize, chunk = HAT_CHUNK) {
-    const layout = hatV2Layout(fileSize, chunk);
-    const salt = await readAt(V2_SALT_AT, sodium.crypto_pwhash_SALTBYTES);
-    const header = await readAt(V2_HEADER_AT, sodium.crypto_secretstream_xchacha20poly1305_HEADERBYTES);
-    const key = sodium.crypto_pwhash(
-        sodium.crypto_secretstream_xchacha20poly1305_KEYBYTES,
-        password,
-        salt,
-        sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
-        sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
-        sodium.crypto_pwhash_ALG_ARGON2ID13,
-    );
+async function openV2Stream(sodium, key, readAt, fileSize, { chunk, headerAt, bodyAt, firstError }) {
+    const layout = hatV2Layout(fileSize, chunk, bodyAt);
+    const header = await readAt(headerAt, sodium.crypto_secretstream_xchacha20poly1305_HEADERBYTES);
     let state;
     try {
         state = sodium.crypto_secretstream_xchacha20poly1305_init_pull(header, key);
     } catch {
-        throw new SealError('wrong_password');
+        throw new SealError(firstError);
+    } finally {
+        sodium.memzero(key);
     }
     const FINAL = sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL;
 
     async function pull(index) {
-        const offset = V2_BODY_AT + index * layout.full;
+        const offset = bodyAt + index * layout.full;
         const data = await readAt(offset, Math.min(layout.full, fileSize - offset));
         let result = null;
         try {
@@ -86,7 +81,7 @@ export async function prepareHatV2(sodium, password, readAt, fileSize, chunk = H
         } catch {
             result = null;
         }
-        if (!result) throw new SealError(index === 0 ? 'wrong_password' : 'damaged');
+        if (!result) throw new SealError(index === 0 ? firstError : 'damaged');
         const last = index === layout.chunks - 1;
         if (result.tag === FINAL && !last) throw new SealError('extra_data');
         if (last && result.tag !== FINAL) throw new SealError('incomplete');
@@ -106,6 +101,52 @@ export async function prepareHatV2(sodium, password, readAt, fileSize, chunk = H
     }
 
     return { plainSize: layout.plainSize, stream };
+}
+
+export async function prepareHatV2(sodium, password, readAt, fileSize, chunk = HAT_CHUNK) {
+    hatV2Layout(fileSize, chunk, V2_BODY_AT);
+    const salt = await readAt(V2_SALT_AT, sodium.crypto_pwhash_SALTBYTES);
+    const key = sodium.crypto_pwhash(
+        sodium.crypto_secretstream_xchacha20poly1305_KEYBYTES,
+        password,
+        salt,
+        sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
+        sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
+        sodium.crypto_pwhash_ALG_ARGON2ID13,
+    );
+    return openV2Stream(sodium, key, readAt, fileSize, { chunk, headerAt: V2_HEADER_AT, bodyAt: V2_BODY_AT, firstError: 'wrong_password' });
+}
+
+export function parseHatKey(sodium, text) {
+    const clean = String(text).replace(/\s+/g, '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    let bytes;
+    try {
+        bytes = sodium.from_base64(clean, sodium.base64_variants.URLSAFE_NO_PADDING);
+    } catch {
+        throw new SealError('bad_hat_key');
+    }
+    if (bytes.length !== sodium.crypto_kx_SECRETKEYBYTES) throw new SealError('bad_hat_key');
+    return bytes;
+}
+
+export async function prepareHatV2KeyPair(sodium, privateText, publicText, readAt, fileSize, chunk = HAT_CHUNK) {
+    hatV2Layout(fileSize, chunk, V2_KEYPAIR_BODY_AT);
+    const secretKey = parseHatKey(sodium, privateText);
+    const senderKey = parseHatKey(sodium, publicText);
+    const ownKey = sodium.crypto_scalarmult_base(secretKey);
+    if (sodium.memcmp(ownKey, senderKey) || sodium.memcmp(secretKey, senderKey)) throw new SealError('hat_own_key');
+    let keys;
+    try {
+        keys = sodium.crypto_kx_server_session_keys(ownKey, secretKey, senderKey);
+    } catch {
+        throw new SealError('wrong_hat_keys');
+    } finally {
+        sodium.memzero(secretKey);
+    }
+    sodium.memzero(keys.sharedTx);
+    return openV2Stream(sodium, keys.sharedRx, readAt, fileSize, {
+        chunk, headerAt: V2_KEYPAIR_HEADER_AT, bodyAt: V2_KEYPAIR_BODY_AT, firstError: 'wrong_hat_keys',
+    });
 }
 
 function v1PasswordBytes(password) {

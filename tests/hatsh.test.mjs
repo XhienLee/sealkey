@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import { sodium, concat } from './helpers.mjs';
-import { makeV1, makeV2 } from './hatsh-fixtures.mjs';
+import { makeV1, makeV2, makeKeys, makeV2KeyPair } from './hatsh-fixtures.mjs';
 import {
-    hatKind, isSealkey, hatOutName, hatV2Layout, prepareHatV2, openHatV1, HAT_CHUNK,
+    hatKind, isSealkey, hatOutName, hatV2Layout, prepareHatV2, prepareHatV2KeyPair, openHatV1, HAT_CHUNK,
 } from '../js/hatsh.js';
 
 const subtle = webcrypto.subtle;
@@ -112,4 +112,39 @@ test('v1 rejects a wrong password, a changed file and a cut-off file', async () 
     changed[60] ^= 1;
     await assert.rejects(openHatV1(subtle, changed, 'old password'), { code: 'wrong_password' });
     await assert.rejects(openHatV1(subtle, sealed.slice(0, 60), 'old password'), { code: 'incomplete' });
+});
+
+async function openKeyPair(s, bytes, privateKey, publicKey, chunk) {
+    const opened = await prepareHatV2KeyPair(s, privateKey, publicKey, reader(bytes), bytes.length, chunk);
+    const parts = [];
+    for await (const { data } of opened.stream()) parts.push(data);
+    return concat(parts);
+}
+
+test('v2 key-pair files open with the receiver private key and sender public key', async () => {
+    const s = await sodium();
+    const sender = makeKeys(s);
+    const receiver = makeKeys(s);
+    const plain = random(2500);
+    const sealed = makeV2KeyPair(s, plain, sender.privateKey, receiver.publicKey, 1000);
+    assert.equal(hatKind(sealed), 'v2-keypair');
+    assert.deepEqual(await openKeyPair(s, sealed, receiver.privateKey, sender.publicKey, 1000), plain);
+    const standard = (k) => k.replace(/-/g, '+').replace(/_/g, '/') + '=';
+    assert.deepEqual(await openKeyPair(s, sealed, ` ${standard(receiver.privateKey)} `, standard(sender.publicKey), 1000), plain);
+});
+
+test('v2 key-pair files reject wrong, own and malformed keys', async () => {
+    const s = await sodium();
+    const sender = makeKeys(s);
+    const receiver = makeKeys(s);
+    const other = makeKeys(s);
+    const sealed = makeV2KeyPair(s, text('secret'), sender.privateKey, receiver.publicKey);
+    await assert.rejects(openKeyPair(s, sealed, receiver.privateKey, other.publicKey), { code: 'wrong_hat_keys' });
+    await assert.rejects(openKeyPair(s, sealed, other.privateKey, sender.publicKey), { code: 'wrong_hat_keys' });
+    await assert.rejects(openKeyPair(s, sealed, receiver.privateKey, receiver.publicKey), { code: 'hat_own_key' });
+    await assert.rejects(openKeyPair(s, sealed, 'not a key', sender.publicKey), { code: 'bad_hat_key' });
+    await assert.rejects(openKeyPair(s, sealed, receiver.privateKey, sender.publicKey.slice(0, 20)), { code: 'bad_hat_key' });
+    const changed = sealed.slice();
+    changed[40] ^= 1;
+    await assert.rejects(openKeyPair(s, changed, receiver.privateKey, sender.publicKey), { code: 'wrong_hat_keys' });
 });

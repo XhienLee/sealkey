@@ -1,10 +1,11 @@
 import sodiumModule from '../vendor/libsodium/libsodium-wrappers.mjs';
 import { makeZip, predictLength } from '../vendor/client-zip/index.js';
 import {
-    HEADER_BYTES, KIND_FILE, KIND_BUNDLE, MAX_BUNDLE_FILES, SealError, parseHeader, cleanName,
+    KEY_HEADER_BYTES, KDF_X25519, KIND_FILE, KIND_BUNDLE, MAX_BUNDLE_FILES, SealError, parseHeader, cleanName,
 } from './format.js';
 import { createSealer, sealStream, createOpener, openMeta, checkLength, unsealStream, META_CIPHER_BYTES } from './core.js';
-import { HAT_HEAD_BYTES, HAT_V1_MAX, hatKind, prepareHatV2, openHatV1 } from './hatsh.js';
+import { HAT_HEAD_BYTES, HAT_V1_MAX, hatKind, prepareHatV2, prepareHatV2KeyPair, openHatV1 } from './hatsh.js';
+import { makeSecretWords, deriveKeyPair, encodePublicKey, parsePublicKey, fingerprint } from './keypair.js';
 
 const READ_BYTES = 4 * 1048576;
 const ready = sodiumModule.ready.then(() => sodiumModule);
@@ -74,7 +75,7 @@ function send(data, id) {
     });
 }
 
-async function prepareLock({ items, keyText, zipName }) {
+async function prepareLock({ items, keyText, recipientText, zipName }) {
     const sodium = await ready;
     if (items.length === 0) throw new SealError('unreadable');
     if (items.length > MAX_BUNDLE_FILES) throw new SealError('too_many_files');
@@ -99,7 +100,8 @@ async function prepareLock({ items, keyText, zipName }) {
             return streamSource(makeZip(entries));
         };
     }
-    const sealer = createSealer(sodium, { keyText, meta });
+    const recipient = recipientText ? parsePublicKey(sodium, recipientText) : null;
+    const sealer = createSealer(sodium, recipient ? { recipient, meta } : { keyText, meta });
     checkCancelled(currentId);
     job = { id: currentId, kind: 'lock', sealer, source, meta, progress, count: items.length };
     reply({ type: 'prepared', outSize: sealer.size, meta: { ...meta } });
@@ -131,17 +133,27 @@ async function pumpLock(sealer, source, meta, progress, count, last, id) {
 }
 
 async function inspect({ file }) {
-    const header = parseHeader(await readAt(file, 0, HEADER_BYTES));
-    if (file.size < HEADER_BYTES + META_CIPHER_BYTES) throw new SealError('incomplete');
-    reply({ type: 'header-ok', header: { passes: header.passes, memKiB: header.memKiB, chunkBytes: header.chunkBytes } });
+    const header = parseHeader(await readAt(file, 0, KEY_HEADER_BYTES));
+    if (file.size < header.size + META_CIPHER_BYTES) throw new SealError('incomplete');
+    reply({ type: 'header-ok', header: { kdf: header.kdf, passes: header.passes, memKiB: header.memKiB, chunkBytes: header.chunkBytes } });
 }
 
 async function prepareOpen({ file, keyText }) {
     const sodium = await ready;
-    const header = parseHeader(await readAt(file, 0, HEADER_BYTES));
-    const state = createOpener(sodium, { keyText, header });
+    const header = parseHeader(await readAt(file, 0, KEY_HEADER_BYTES));
+    let state;
+    if (header.kdf === KDF_X25519) {
+        const { secretKey } = deriveKeyPair(sodium, keyText);
+        try {
+            state = createOpener(sodium, { secretKey, header });
+        } finally {
+            sodium.memzero(secretKey);
+        }
+    } else {
+        state = createOpener(sodium, { keyText, header });
+    }
     checkCancelled(currentId);
-    const meta = openMeta(sodium, state, header, await readAt(file, HEADER_BYTES, META_CIPHER_BYTES));
+    const meta = openMeta(sodium, state, header, await readAt(file, header.size, META_CIPHER_BYTES));
     checkLength(file.size, meta, header);
     job = { id: currentId, kind: 'open', sodium, state, header, meta, file };
     reply({ type: 'meta', meta });
@@ -164,18 +176,39 @@ async function runOpen() {
     reply({ type: 'done' });
 }
 
-async function prepareHat({ file, password }) {
+async function makeKeyPair({ words }) {
+    const sodium = await ready;
+    const secretWords = words || makeSecretWords().join('-');
+    const { secretKey, publicKey } = deriveKeyPair(sodium, secretWords);
+    sodium.memzero(secretKey);
+    reply({
+        type: 'keypair',
+        words: words ? null : secretWords.split('-'),
+        publicKey: encodePublicKey(sodium, publicKey),
+        fingerprint: fingerprint(sodium, publicKey),
+    });
+}
+
+async function checkPublic({ text }) {
+    const sodium = await ready;
+    reply({ type: 'public-ok', fingerprint: fingerprint(sodium, parsePublicKey(sodium, text)) });
+}
+
+async function prepareHat({ file, password, privateKey, publicKey }) {
     const kind = hatKind(await readAt(file, 0, HAT_HEAD_BYTES));
-    if (kind === 'v2') {
+    const read = (offset, length) => readAt(file, offset, length);
+    if (kind === 'v2' || kind === 'v2-keypair') {
         const sodium = await ready;
-        const opened = await prepareHatV2(sodium, password, (offset, length) => readAt(file, offset, length), file.size);
+        const opened = kind === 'v2'
+            ? await prepareHatV2(sodium, password, read, file.size)
+            : await prepareHatV2KeyPair(sodium, privateKey, publicKey, read, file.size);
         job = { id: currentId, kind: 'hat', size: opened.plainSize, stream: opened.stream() };
     } else if (kind === 'v1') {
         if (file.size > HAT_V1_MAX) throw new SealError('too_large');
         const data = await openHatV1(crypto.subtle, await readAt(file, 0, file.size), password);
         job = { id: currentId, kind: 'hat', size: data.length, stream: pieces(data) };
     } else {
-        throw new SealError(kind === 'v2-keypair' ? 'hat_keypair' : 'not_hat');
+        throw new SealError('not_hat');
     }
     reply({ type: 'hat-ready', size: job.size, version: kind });
 }
@@ -223,6 +256,10 @@ onmessage = async ({ data: message }) => {
             await prepareOpen(message);
         } else if (message.type === 'hat-prepare') {
             await prepareHat(message);
+        } else if (message.type === 'make-keypair') {
+            await makeKeyPair(message);
+        } else if (message.type === 'check-public') {
+            await checkPublic(message);
         } else if (message.type === 'start') {
             if (!job) throw new SealError('unknown');
             await (job.kind === 'lock' ? runLock() : job.kind === 'hat' ? runHat() : runOpen());

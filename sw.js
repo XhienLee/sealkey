@@ -8,6 +8,7 @@ const FILES = [
     'js/format.js',
     'js/hatsh.js',
     'js/key.js',
+    'js/keypair.js',
     'js/save.js',
     'js/words.js',
     'js/worker.js',

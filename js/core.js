@@ -1,7 +1,9 @@
 import {
-    DEFAULTS, HEADER_BYTES, META_BYTES, SS_ABYTES, SALT_BYTES,
+    DEFAULTS, META_BYTES, SS_ABYTES, SALT_BYTES, KDF_X25519, PUBLIC_KEY_BYTES,
     SealError, encodeHeader, encodeMeta, parseMeta, lockedSize, chunkCount,
 } from './format.js';
+
+const KX_LABEL = new TextEncoder().encode('Sealkey X25519 file key v1');
 
 function deriveKey(sodium, keyText, salt, passes, memKiB) {
     try {
@@ -11,9 +13,44 @@ function deriveKey(sodium, keyText, salt, passes, memKiB) {
     }
 }
 
-export function createSealer(sodium, { keyText, meta, params = DEFAULTS }) {
+function fileKeyFromShared(sodium, shared, ephemeral, recipient, salt) {
+    const input = new Uint8Array(KX_LABEL.length + shared.length + ephemeral.length + recipient.length);
+    input.set(KX_LABEL, 0);
+    input.set(shared, KX_LABEL.length);
+    input.set(ephemeral, KX_LABEL.length + shared.length);
+    input.set(recipient, KX_LABEL.length + shared.length + ephemeral.length);
+    try {
+        return sodium.crypto_generichash(32, input, salt);
+    } finally {
+        sodium.memzero(input);
+        sodium.memzero(shared);
+    }
+}
+
+function sharedSecret(sodium, secretKey, publicKey) {
+    try {
+        return sodium.crypto_scalarmult(secretKey, publicKey);
+    } catch {
+        throw new SealError('bad_public_key');
+    }
+}
+
+export function createSealer(sodium, { keyText, recipient = null, meta, params = DEFAULTS }) {
     const salt = sodium.randombytes_buf(SALT_BYTES);
-    const key = deriveKey(sodium, keyText, salt, params.passes, params.memKiB);
+    let ephemeral = null;
+    let key;
+    if (recipient) {
+        if (recipient.length !== PUBLIC_KEY_BYTES) throw new SealError('bad_public_key');
+        const pair = sodium.crypto_box_keypair();
+        ephemeral = pair.publicKey;
+        try {
+            key = fileKeyFromShared(sodium, sharedSecret(sodium, pair.privateKey, recipient), ephemeral, recipient, salt);
+        } finally {
+            sodium.memzero(pair.privateKey);
+        }
+    } else {
+        key = deriveKey(sodium, keyText, salt, params.passes, params.memKiB);
+    }
     let state;
     let ssHeader;
     try {
@@ -21,12 +58,12 @@ export function createSealer(sodium, { keyText, meta, params = DEFAULTS }) {
     } finally {
         sodium.memzero(key);
     }
-    const header = encodeHeader({ ...params, salt, ssHeader });
+    const header = encodeHeader({ ...params, salt, ssHeader, ephemeral });
     const metaCipher = sodium.crypto_secretstream_xchacha20poly1305_push(
         state, encodeMeta(meta), header, sodium.crypto_secretstream_xchacha20poly1305_TAG_MESSAGE);
     return {
         params,
-        size: lockedSize(meta.size, params.chunkBytes),
+        size: lockedSize(meta.size, params.chunkBytes, header.length),
         prefix() {
             const out = new Uint8Array(header.length + metaCipher.length);
             out.set(header, 0);
@@ -77,8 +114,16 @@ export async function* sealStream(sealer, source, total) {
     }
 }
 
-export function createOpener(sodium, { keyText, header }) {
-    const key = deriveKey(sodium, keyText, header.salt, header.passes, header.memKiB);
+export function createOpener(sodium, { keyText = null, secretKey = null, header }) {
+    let key;
+    if (header.kdf === KDF_X25519) {
+        if (!secretKey) throw new SealError('needs_secret_words');
+        const recipient = sodium.crypto_scalarmult_base(secretKey);
+        key = fileKeyFromShared(sodium, sharedSecret(sodium, secretKey, header.ephemeral), header.ephemeral, recipient, header.salt);
+    } else {
+        if (keyText === null) throw new SealError('needs_key');
+        key = deriveKey(sodium, keyText, header.salt, header.passes, header.memKiB);
+    }
     try {
         return sodium.crypto_secretstream_xchacha20poly1305_init_pull(header.ssHeader, key);
     } catch {
@@ -104,7 +149,7 @@ export function openMeta(sodium, state, header, metaCipher) {
 }
 
 export function checkLength(fileSize, meta, header) {
-    const expected = lockedSize(meta.size, header.chunkBytes);
+    const expected = lockedSize(meta.size, header.chunkBytes, header.size);
     if (fileSize < expected) throw new SealError('incomplete');
     if (fileSize > expected) throw new SealError('extra_data');
 }
@@ -113,7 +158,7 @@ export async function* unsealStream(sodium, state, readAt, fileSize, header, met
     checkLength(fileSize, meta, header);
     const chunkBytes = header.chunkBytes;
     const total = chunkCount(meta.size, chunkBytes);
-    let offset = HEADER_BYTES + META_CIPHER_BYTES;
+    let offset = header.size + META_CIPHER_BYTES;
     let done = 0;
     for (let index = 0; index < total; index++) {
         const plainLength = Math.min(chunkBytes, meta.size - done);
