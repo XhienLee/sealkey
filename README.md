@@ -237,7 +237,7 @@ The output should match the hash on the release page.
 - Wordlist by the Electronic Frontier Foundation, [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/). `tools/eff_large_wordlist.txt` is the unchanged original from eff.org, SHA-256 `addd35536511597a02fa0a9ff1e5284677b8883b83e986e43f15a3db996b903e`. `js/words.js` is generated from it with `node tools/make-words.mjs`, which removes the 4 hyphenated words and checks that exactly 7,772 unique words remain.
 - [libsodium.js](https://github.com/jedisct1/libsodium.js) 0.8.4 (`libsodium-wrappers-sumo`), ISC license, in `vendor/libsodium/`. The only change is the import path in `libsodium-wrappers.mjs`, so it loads the local `libsodium-sumo.mjs`.
 - [client-zip](https://github.com/Touffy/client-zip) 2.5.1, MIT license, in `vendor/client-zip/`.
-- Inter, Space Grotesk and JetBrains Mono fonts, SIL Open Font License 1.1, in `fonts/`.
+- Bricolage Grotesque, DM Sans and DM Mono fonts, SIL Open Font License 1.1, in `fonts/`.
 
 ## License
 
