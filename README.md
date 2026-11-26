@@ -9,11 +9,50 @@ Made by Ninth Life Labs. Need a custom website, a web app, or a basic security c
 [![Facebook](https://img.shields.io/badge/Facebook-Ninth%20Life%20Labs-1877F2?style=for-the-badge&logo=facebook&logoColor=white)](https://www.facebook.com/profile.php?id=61596408329725)
 [![Email](https://img.shields.io/badge/Email-team.ninthlifelabs%40gmail.com-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:team.ninthlifelabs@gmail.com)
 
-1. Choose one file, several files or a folder. Sealkey creates a 6-word key and saves one `.seal` file.
-2. Send the `.seal` file one way (email, Drive) and the key another way (a message, a call, in person).
-3. The receiver opens Sealkey, picks the file, types the key and saves the original file, or a ZIP when several files were locked.
+**Lock a file so only the person with the key can open it. It all happens in your browser, nothing is uploaded.**
 
-A lost key cannot be recovered by anyone.
+Sealkey turns any file (or several files, or a folder) into one locked `.seal` file. To open it again you need a key made of 6 random words, like `apple-river-tiger-lamp-cloud-seven`. No account, no app to install, works on phone and computer, and even works offline after your first visit.
+
+## What is it good for?
+
+- Emailing a private document without worrying who reads your inbox
+- Putting a locked backup on Google Drive or a USB stick
+- Sending something to a friend or a client safely
+- Locking a file for someone's public key, so you never have to share a secret at all
+
+## How to use it
+
+**Locking**
+1. Open Sealkey and choose a file, several files or a folder.
+2. Sealkey shows you **6 words**. Write them down or copy them.
+3. Save the `.seal` file it gives you.
+
+**Sending**
+Send the `.seal` file one way (email, Drive, chat) and the 6 words another way (a text message, a call, in person). If one gets stolen, it is useless without the other.
+
+**Opening**
+1. Open Sealkey and choose the `.seal` file.
+2. Type the 6 words.
+3. Save the original file (or a ZIP if several were locked).
+
+## Is it safe? What can it not do?
+
+- **Your files and key never leave your device.** There is nothing to hack on a server because there is no server involved.
+- **Lose the key, lose the file.** Nobody can recover it, not even the maker of this site.
+- Anyone who has *both* the file and the key can open it. Send them separately.
+- It cannot protect you from a hacked phone or computer, or from a fake copy of the website. Use the real one: <https://sealkey.netlify.app>
+- It also opens old `.enc` files from hat.sh (it never makes them).
+
+## Questions
+
+**Do I need to install anything?** No. Open the website. You can add it to your home screen if you like.
+**Is it free?** Yes, and open source (MIT).
+**How big a file can I lock?** About 10 GB in Chrome or Edge on a computer, 1 GB in other computer browsers, 500 MB on phones.
+**Can I use my own host?** Yes, see "Deploy" below. It is only static files.
+
+---
+
+# For developers and hosts
 
 ## Deploy
 
@@ -231,6 +270,19 @@ git archive --format=tar HEAD | sha256sum
 ```
 
 The output should match the hash on the release page.
+
+## The key family
+
+Small private tools. One key each, no accounts, nothing to sign up for.
+
+| Tool | What it does | Needs a server? |
+|---|---|---|
+| [Sealkey](https://github.com/XhienLee/sealkey) | Lock a file with a few words, open it later | No |
+| [Stowkey](https://github.com/XhienLee/stowkey) | Private online file storage, one key | Yes (PHP) |
+| [Sendkey](https://github.com/XhienLee/sendkey) | Send a file through a link that works once | Yes (PHP + SQLite) |
+| [Dropkey](https://github.com/XhienLee/dropkey) | A link anyone can use to send *you* a file privately | Yes (PHP + SQLite) |
+| [Stashkey](https://github.com/XhienLee/stashkey) | Private notes you open with 6 words | Yes (PHP + SQLite) |
+| [Stampkey](https://github.com/XhienLee/stampkey) | Prove a file is yours and unchanged | No |
 
 ## Credits
 
